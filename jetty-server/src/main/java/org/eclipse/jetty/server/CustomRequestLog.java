@@ -1003,13 +1003,13 @@ public class CustomRequestLog extends ContainerLifeCycle implements RequestLog
     private static void logBytesReceived(StringBuilder b, Request request, Response response)
     {
         //todo this be content received rather than consumed
-        b.append(request.getHttpInput().getContentConsumed());
+        b.append(request.getHttpInput().getContentLength());
     }
 
     private static void logBytesReceivedCLF(StringBuilder b, Request request, Response response)
     {
         //todo this be content received rather than consumed
-        long received = request.getHttpInput().getContentConsumed();
+        long received = request.getHttpInput().getContentLength();
         if (received == 0)
             b.append('-');
         else
@@ -1019,13 +1019,13 @@ public class CustomRequestLog extends ContainerLifeCycle implements RequestLog
     private static void logBytesTransferred(StringBuilder b, Request request, Response response)
     {
         //todo this be content received rather than consumed
-        b.append(request.getHttpInput().getContentConsumed() + response.getHttpOutput().getWritten());
+        b.append(request.getHttpInput().getContentLength() + response.getHttpOutput().getWritten());
     }
 
     private static void logBytesTransferredCLF(StringBuilder b, Request request, Response response)
     {
         //todo this be content received rather than consumed
-        long transferred = request.getHttpInput().getContentConsumed() + response.getHttpOutput().getWritten();
+        long transferred = request.getHttpInput().getContentLength() + response.getHttpOutput().getWritten();
         if (transferred == 0)
             b.append('-');
         else
