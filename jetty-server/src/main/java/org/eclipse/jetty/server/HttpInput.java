@@ -34,8 +34,8 @@ import org.eclipse.jetty.server.handler.ContextHandler;
 import org.eclipse.jetty.util.BufferUtil;
 import org.eclipse.jetty.util.Callback;
 import org.eclipse.jetty.util.component.Destroyable;
-import org.eclipse.jetty.util.log.Log;
-import org.eclipse.jetty.util.log.Logger;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * <p> While this class is-a Runnable, it should never be dispatched in it's own thread. It is a runnable only so that the calling thread can use {@link
@@ -43,7 +43,7 @@ import org.eclipse.jetty.util.log.Logger;
  */
 public class HttpInput extends ServletInputStream implements Runnable
 {
-    private static final Logger LOG = Log.getLogger(HttpInput.class);
+    private static final Logger LOG = LoggerFactory.getLogger(HttpInput.class);
 
     private final byte[] _oneByteBuffer = new byte[1];
 
