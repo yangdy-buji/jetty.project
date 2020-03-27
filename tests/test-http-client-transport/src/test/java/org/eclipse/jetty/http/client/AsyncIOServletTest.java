@@ -1771,10 +1771,11 @@ public class AsyncIOServletTest extends AbstractTest<AsyncIOServletTest.AsyncTra
         }
 
         @Override
-        public void stopServer()
+        public void stopServer() throws Exception
         {
             checkScope();
             scope.set(null);
+            super.stopServer();
         }
     }
 }
