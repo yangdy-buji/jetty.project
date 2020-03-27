@@ -127,8 +127,9 @@ public class HttpInput extends ServletInputStream implements Runnable
      * Adds some content to this input stream.
      *
      * @param content the content to add
+     * @return true if content channel woken for read
      */
-    public void addContent(Content content)
+    public boolean addContent(Content content)
     {
         if (LOG.isDebugEnabled())
             LOG.debug("addContent {} {}", content, _contentProducer);
@@ -140,7 +141,8 @@ public class HttpInput extends ServletInputStream implements Runnable
         }
         _contentProducer.addContent(content);
         if (isAsync() && _contentProducer.available(this::produceContent) > 0)
-            _channelState.onContentAdded();
+            return _channelState.onContentAdded();
+        return false;
     }
 
     public boolean hasContent()

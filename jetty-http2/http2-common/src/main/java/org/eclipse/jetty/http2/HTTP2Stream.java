@@ -457,6 +457,14 @@ public class HTTP2Stream extends IdleTimeout implements IStream, Callback, Dumpa
         }
     }
 
+    public int available()
+    {
+        try (AutoLock l = lock.lock())
+        {
+            return dataQueue.size();
+        }
+    }
+
     private long demand()
     {
         try (AutoLock l = lock.lock())

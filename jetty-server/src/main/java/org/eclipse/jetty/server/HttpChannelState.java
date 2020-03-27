@@ -109,8 +109,8 @@ public class HttpChannelState
         IDLE,        // No isReady; No data
         REGISTER,    // isReady()==false handling; No data
         REGISTERED,  // isReady()==false !handling; No data
-        POSSIBLE,    // isReady()==false async read callback called (http/1 only)
-        PRODUCING,   // isReady()==false READ_PRODUCE action is being handled (http/1 only)
+        POSSIBLE,    // isReady()==false async read callback called
+        PRODUCING,   // isReady()==false READ_PRODUCE action is being handled
         READY        // isReady() was false, onContentAdded has been called
     }
 

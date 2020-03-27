@@ -180,6 +180,11 @@ public interface Stream
     public void demand(long n);
 
     /**
+     * @return the amount of {@code DATA} frames already available in this stream.
+     */
+    public int available();
+
+    /**
      * <p>A {@link Stream.Listener} is the passive counterpart of a {@link Stream} and receives
      * events happening on an HTTP/2 stream.</p>
      * <p>HTTP/2 data is flow controlled - this means that only a finite number of data events
