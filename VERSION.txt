@@ -1,3 +1,5 @@
+jetty-9.2.31-SNAPSHOT
+
 jetty-9.2.30.v20200428 - 28 April 2020
  + 4443 Track backport of ALPN APIs to Java 8
  + 4819 Some methods used on Jetty 9.2.29 are not available on Android API 23
