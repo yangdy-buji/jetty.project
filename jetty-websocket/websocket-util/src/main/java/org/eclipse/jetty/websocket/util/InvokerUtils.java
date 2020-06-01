@@ -25,6 +25,7 @@ import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Objects;
 
 public class InvokerUtils
 {
@@ -58,7 +59,7 @@ public class InvokerUtils
             if ((this.name != null) || (other.name != null))
             {
                 // They have to match
-                if (this.name.equals(other.name))
+                if (Objects.equals(this.name, other.name))
                 {
                     if (convertible)
                     {
