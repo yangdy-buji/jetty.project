@@ -736,7 +736,7 @@ public class Request implements HttpServletRequest
 
     public long getContentRead()
     {
-        return _input.getContentConsumed();
+        return _input.getContentLength();
     }
 
     @Override

@@ -64,7 +64,7 @@ import org.slf4j.LoggerFactory;
  * HttpParser.RequestHandler callbacks.   The completion of the active phase is signalled by a call to
  * HttpTransport.completed().
  */
-public class HttpChannel implements Runnable, HttpOutput.Interceptor
+public abstract class HttpChannel implements Runnable, HttpOutput.Interceptor
 {
     public static Listener NOOP_LISTENER = new Listener() {};
     private static final Logger LOG = LoggerFactory.getLogger(HttpChannel.class);
@@ -119,10 +119,14 @@ public class HttpChannel implements Runnable, HttpOutput.Interceptor
         return _state.isSendError();
     }
 
-    protected HttpInput newHttpInput(HttpChannelState state)
+    private HttpInput newHttpInput(HttpChannelState state)
     {
         return new HttpInput(state);
     }
+
+    public abstract void produceContent();
+
+    public abstract void failContent(Throwable failure);
 
     protected HttpOutput newHttpOutput()
     {
@@ -945,7 +949,7 @@ public class HttpChannel implements Runnable, HttpOutput.Interceptor
         return null;
     }
 
-    protected void execute(Runnable task)
+    public void execute(Runnable task)
     {
         _executor.execute(task);
     }

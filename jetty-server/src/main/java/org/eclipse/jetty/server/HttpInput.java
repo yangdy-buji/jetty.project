@@ -18,21 +18,19 @@
 
 package org.eclipse.jetty.server;
 
-import java.io.EOFException;
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.util.ArrayDeque;
-import java.util.Deque;
 import java.util.Objects;
-import java.util.concurrent.Executor;
+import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Consumer;
 import javax.servlet.ReadListener;
 import javax.servlet.ServletInputStream;
 
 import org.eclipse.jetty.http.BadMessageException;
 import org.eclipse.jetty.http.HttpStatus;
 import org.eclipse.jetty.io.EofException;
-import org.eclipse.jetty.io.RuntimeIOException;
+import org.eclipse.jetty.server.handler.ContextHandler;
 import org.eclipse.jetty.util.BufferUtil;
 import org.eclipse.jetty.util.Callback;
 import org.eclipse.jetty.util.component.Destroyable;
@@ -40,42 +38,714 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * {@link HttpInput} provides an implementation of {@link ServletInputStream} for {@link HttpChannel}.
- * <p>
- * Content may arrive in patterns such as [content(), content(), messageComplete()]
- * so that this class maintains two states: the content state that tells
- * whether there is content to consume and the EOF state that tells whether an EOF has arrived.
- * Only once the content has been consumed the content state is moved to the EOF state.
- * </p>
+ * <p> While this class is-a Runnable, it should never be dispatched in it's own thread. It is a runnable only so that the calling thread can use {@link
+ * ContextHandler#handle(Runnable)} to setup classloaders etc. </p>
  */
 public class HttpInput extends ServletInputStream implements Runnable
 {
-    /**
-     * An interceptor for HTTP Request input.
-     * <p>
-     * Unlike InputStream wrappers that can be applied by filters, an interceptor
-     * is entirely transparent and works with async IO APIs.
-     * </p>
-     * <p>
-     * An Interceptor may consume data from the passed content and the interceptor
-     * will continue to be called for the same content until the interceptor returns
-     * null or an empty content. Thus even if the passed content is completely consumed
-     * the interceptor will be called with the same content until it can no longer
-     * produce more content.
-     * </p>
-     *
-     * @see HttpInput#setInterceptor(Interceptor)
-     * @see HttpInput#addInterceptor(Interceptor)
-     */
-    public interface Interceptor
+    private static final Logger LOG = LoggerFactory.getLogger(HttpInput.class);
+
+    private final byte[] _oneByteBuffer = new byte[1];
+
+    private final HttpChannelState _channelState;
+    private final ContentProducer _contentProducer = new ContentProducer();
+    // This semaphore is only used in blocking mode, and a standard lock with a condition variable
+    // cannot work here because there is a race condition between the _contentProducer.read() call
+    // and the blockForContent() call: content can be produced any time between these two calls so
+    // the call to unblock() done by the content-producing thread to wake up the user thread executing read()
+    // must 'remember' the unblock() call, such as if it happens before the thread executing read() reaches the
+    // blockForContent() method, it will not get stuck in it forever waiting for an unblock() call it missed.
+    private final Semaphore _semaphore = new Semaphore(0);
+
+    private Eof _eof = Eof.NOT_YET;
+    private Throwable _error;
+    private ReadListener _readListener;
+    private long _firstByteTimeStamp = Long.MIN_VALUE;
+
+    public HttpInput(HttpChannelState state)
     {
-        /**
-         * @param content The content to be intercepted (may be empty or a {@link SentinelContent}.
-         * The content will be modified with any data the interceptor consumes, but there is no requirement
-         * that all the data is consumed by the interceptor.
-         * @return The intercepted content or null if interception is completed for that content.
-         */
-        Content readFrom(Content content);
+        _channelState = state;
+    }
+
+    /* HttpInput */
+
+    public void recycle()
+    {
+        if (LOG.isDebugEnabled())
+            LOG.debug("recycle");
+        _contentProducer.recycle();
+        _eof = Eof.NOT_YET;
+        _error = null;
+        _readListener = null;
+        _firstByteTimeStamp = Long.MIN_VALUE;
+    }
+
+    /**
+     * @return The current Interceptor, or null if none set
+     */
+    public Interceptor getInterceptor()
+    {
+        return _contentProducer.getInterceptor();
+    }
+
+    /**
+     * Set the interceptor.
+     *
+     * @param interceptor The interceptor to use.
+     */
+    public void setInterceptor(Interceptor interceptor)
+    {
+        _contentProducer.setInterceptor(interceptor);
+    }
+
+    /**
+     * Set the {@link Interceptor}, chaining it to the existing one if
+     * an {@link Interceptor} is already set.
+     *
+     * @param interceptor the next {@link Interceptor} in a chain
+     */
+    public void addInterceptor(Interceptor interceptor)
+    {
+        Interceptor currentInterceptor = _contentProducer.getInterceptor();
+        if (currentInterceptor == null)
+            _contentProducer.setInterceptor(interceptor);
+        else
+            _contentProducer.setInterceptor(new ChainedInterceptor(currentInterceptor, interceptor));
+    }
+
+    /**
+     * Called by channel when asynchronous IO needs to produce more content
+     */
+    public void asyncReadProduce()
+    {
+        if (LOG.isDebugEnabled())
+            LOG.debug("asyncReadProduce {}", _contentProducer);
+        produceContent();
+    }
+
+    /**
+     * Adds some content to this input stream.
+     *
+     * @param content the content to add
+     * @return true if content channel woken for read
+     */
+    public boolean addContent(Content content)
+    {
+        if (LOG.isDebugEnabled())
+            LOG.debug("addContent {} {}", content, _contentProducer);
+        if (_firstByteTimeStamp == Long.MIN_VALUE)
+        {
+            _firstByteTimeStamp = System.nanoTime();
+            if (_firstByteTimeStamp == Long.MIN_VALUE)
+                _firstByteTimeStamp++;
+        }
+        _contentProducer.addContent(content);
+        if (isAsync() && _contentProducer.available(this::produceContent) > 0)
+            return _channelState.onContentAdded();
+        return false;
+    }
+
+    public boolean hasContent()
+    {
+        return _contentProducer.hasRawContent();
+    }
+
+    // There are 3 sources which can call this method in parallel:
+    // 1) HTTP2 read() that has a demand served on the app thread;
+    // 2) HTTP2 read() that has a demand served by a server thread;
+    // 3) onIdleTimeout called by a server thread;
+    // which means the semaphore can have up to 2 permits.
+    public void unblock()
+    {
+        if (LOG.isDebugEnabled())
+            LOG.debug("signalling blocked thread to wake up");
+        if (!isError() && !_eof.isEof() && _semaphore.availablePermits() > 1)
+            throw new AssertionError("Only one thread should call unblock and only if we are blocked");
+        _semaphore.release();
+    }
+
+    public long getContentLength()
+    {
+        return _contentProducer.getRawContentArrived();
+    }
+
+    /**
+     * This method should be called to signal that an EOF has been detected before all the expected content arrived.
+     * <p>
+     * Typically this will result in an EOFException being thrown from a subsequent read rather than a -1 return.
+     *
+     * @return true if content channel woken for read
+     */
+    public boolean earlyEOF()
+    {
+        if (LOG.isDebugEnabled())
+            LOG.debug("received early EOF");
+        _eof = Eof.EARLY_EOF;
+        if (isAsync())
+            return _channelState.onContentAdded();
+        unblock();
+        return false;
+    }
+
+    /**
+     * This method should be called to signal that all the expected content arrived.
+     *
+     * @return true if content channel woken for read
+     */
+    public boolean eof()
+    {
+        if (LOG.isDebugEnabled())
+            LOG.debug("received EOF");
+        _eof = Eof.EOF;
+        if (isAsync())
+            return _channelState.onContentAdded();
+        unblock();
+        return false;
+    }
+
+    public boolean consumeAll()
+    {
+        if (LOG.isDebugEnabled())
+            LOG.debug("consume all");
+        _contentProducer.consumeTransformedContent(this::failContent, new IOException("Unconsumed content"));
+        if (_eof.isEof())
+            _eof = Eof.CONSUMED_EOF;
+
+        if (isFinished())
+            return !isError();
+
+        _eof = Eof.EARLY_EOF;
+        return false;
+    }
+
+    public boolean isError()
+    {
+        return _error != null;
+    }
+
+    public boolean isAsync()
+    {
+        return _readListener != null;
+    }
+
+    public boolean onIdleTimeout(Throwable x)
+    {
+        boolean neverDispatched = _channelState.isIdle();
+        boolean waitingForContent = _contentProducer.available(this::produceContent) == 0 && !_eof.isEof();
+        if ((waitingForContent || neverDispatched) && !isError())
+        {
+            x.addSuppressed(new Throwable("HttpInput idle timeout"));
+            _error = x;
+            if (isAsync())
+                return _channelState.onContentAdded();
+            unblock();
+        }
+        return false;
+    }
+
+    public boolean failed(Throwable x)
+    {
+        if (LOG.isDebugEnabled())
+            LOG.debug("failed " + x);
+        if (_error != null && _error != x)
+            _error.addSuppressed(x);
+        else
+            _error = x;
+
+        if (isAsync())
+            return _channelState.onContentAdded();
+        unblock();
+        return false;
+    }
+
+    /* ServletInputStream */
+
+    @Override
+    public boolean isFinished()
+    {
+        boolean finished = !_contentProducer.hasRawContent() && _eof.isConsumed();
+        if (LOG.isDebugEnabled())
+            LOG.debug("isFinished? {}", finished);
+        return finished;
+    }
+
+    @Override
+    public boolean isReady()
+    {
+        // calling _contentProducer.available() might change the _eof state, so the following test order matters
+        if (_contentProducer.available(this::produceContent) > 0 || _eof.isEof())
+        {
+            if (LOG.isDebugEnabled())
+                LOG.debug("isReady? true");
+            return true;
+        }
+        if (LOG.isDebugEnabled())
+            LOG.debug("isReady? false");
+        _channelState.onReadUnready();
+        return false;
+    }
+
+    @Override
+    public void setReadListener(ReadListener readListener)
+    {
+        if (_readListener != null)
+            throw new IllegalStateException("ReadListener already set");
+        _readListener = Objects.requireNonNull(readListener);
+        //illegal if async not started
+        if (!_channelState.isAsyncStarted())
+            throw new IllegalStateException("Async not started");
+
+        if (LOG.isDebugEnabled())
+            LOG.debug("setReadListener error=" + _error + " eof=" + _eof + " " + _contentProducer);
+        boolean woken;
+        if (isError())
+        {
+            woken = _channelState.onReadReady();
+        }
+        else
+        {
+            if (_contentProducer.available(this::produceContent) > 0)
+            {
+                woken = _channelState.onReadReady();
+            }
+            else if (_eof.isEof())
+            {
+                woken = _channelState.onReadEof();
+            }
+            else
+            {
+                _channelState.onReadUnready();
+                woken = false;
+            }
+        }
+
+        if (LOG.isDebugEnabled())
+            LOG.debug("setReadListener woken=" + woken);
+        if (woken)
+            scheduleReadListenerNotification();
+    }
+
+    private void scheduleReadListenerNotification()
+    {
+        HttpChannel channel = _channelState.getHttpChannel();
+        channel.execute(channel);
+    }
+
+    @Override
+    public int read() throws IOException
+    {
+        int read = read(_oneByteBuffer, 0, 1);
+        if (read == 0)
+            throw new IOException("unready read=0");
+        return read < 0 ? -1 : _oneByteBuffer[0] & 0xFF;
+    }
+
+    @Override
+    public int read(byte[] b, int off, int len) throws IOException
+    {
+        // Calculate minimum request rate for DOS protection
+        long minRequestDataRate = _channelState.getHttpChannel().getHttpConfiguration().getMinRequestDataRate();
+        if (minRequestDataRate > 0 && _firstByteTimeStamp != Long.MIN_VALUE)
+        {
+            long period = System.nanoTime() - _firstByteTimeStamp;
+            if (period > 0)
+            {
+                long minimumData = minRequestDataRate * TimeUnit.NANOSECONDS.toMillis(period) / TimeUnit.SECONDS.toMillis(1);
+                if (_contentProducer.getRawContentArrived() < minimumData)
+                {
+                    BadMessageException bad = new BadMessageException(HttpStatus.REQUEST_TIMEOUT_408,
+                        String.format("Request content data rate < %d B/s", minRequestDataRate));
+                    if (_channelState.isResponseCommitted())
+                        _channelState.getHttpChannel().abort(bad);
+                    throw bad;
+                }
+            }
+        }
+
+        while (true)
+        {
+            // The semaphore's permits must be drained before we call read() because:
+            // 1) _contentProducer.read() may call unblock() which enqueues a permit even if the content was produced
+            //    by the exact thread that called HttpInput.read(), hence leaving around an unconsumed permit that would
+            //    be consumed the next time HttpInput.read() is called, mistakenly believing that content was produced.
+            // 2) HTTP2 demand served asynchronously does call unblock which does enqueue a permit in the semaphore;
+            //    this permit would then be mistakenly consumed by the next call to blockForContent() once all the produced
+            //    content got consumed.
+            if (!isAsync())
+                _semaphore.drainPermits();
+            int read = _contentProducer.read(this::produceContent, b, off, len);
+            if (LOG.isDebugEnabled())
+                LOG.debug("read produced {} byte(s)", read);
+            if (read > 0)
+                return read;
+
+            if (LOG.isDebugEnabled())
+                LOG.debug("read error = " + _error);
+            if (_error != null)
+                throw new IOException(_error);
+
+            if (LOG.isDebugEnabled())
+                LOG.debug("read EOF = {}", _eof);
+            if (_eof.isEarly())
+                throw new EofException("Early EOF");
+
+            if (LOG.isDebugEnabled())
+                LOG.debug("read async = {}", isAsync());
+            if (!isAsync())
+            {
+                if (_eof.isEof())
+                {
+                    _eof = Eof.CONSUMED_EOF;
+                    if (LOG.isDebugEnabled())
+                        LOG.debug("read on EOF, switching to CONSUMED_EOF and returning");
+                    return -1;
+                }
+                if (LOG.isDebugEnabled())
+                    LOG.debug("read blocked");
+                blockForContent();
+                if (LOG.isDebugEnabled())
+                    LOG.debug("read unblocked");
+            }
+            else
+            {
+                if (_eof.isEof())
+                {
+                    _eof = Eof.CONSUMED_EOF;
+                    boolean wasInAsyncWait = _channelState.onReadEof();
+                    if (LOG.isDebugEnabled())
+                        LOG.debug("async read on EOF (was in async wait? {}), switching to CONSUMED_EOF and returning", wasInAsyncWait);
+                    if (wasInAsyncWait)
+                        scheduleReadListenerNotification();
+                    return -1;
+                }
+                else
+                {
+                    //TODO returning 0 breaks the InputStream contract. Shouldn't IOException be thrown instead?
+                    _channelState.getHttpChannel().onAsyncWaitForContent(); // switches on fill interested
+                    return 0;
+                }
+            }
+        }
+    }
+
+    @Override
+    public int available()
+    {
+        int available = _contentProducer.available(this::produceContent);
+        if (LOG.isDebugEnabled())
+            LOG.debug("available = {}", available);
+        return available;
+    }
+
+    private void blockForContent()
+    {
+        try
+        {
+            _channelState.getHttpChannel().onBlockWaitForContent(); // switches on fill interested
+            if (LOG.isDebugEnabled())
+                LOG.debug("waiting for signal to wake up");
+            _semaphore.acquire();
+            if (LOG.isDebugEnabled())
+                LOG.debug("signalled to wake up");
+        }
+        catch (Throwable x)
+        {
+            _channelState.getHttpChannel().onBlockWaitForContentFailure(x);
+        }
+    }
+
+    /* Runnable */
+
+    /*
+     * <p> While this class is-a Runnable, it should never be dispatched in it's own thread. It is a runnable only so that the calling thread can use {@link
+     * ContextHandler#handle(Runnable)} to setup classloaders etc. </p>
+     */
+    @Override
+    public void run()
+    {
+        if (!_contentProducer.hasRawContent())
+        {
+            if (LOG.isDebugEnabled())
+                LOG.debug("running has no raw content; error: {}, EOF = {}", _error, _eof);
+            if (_error != null || _eof.isEarly())
+            {
+                // TODO is this necessary to add here?
+                _channelState.getHttpChannel().getResponse().getHttpFields().add(HttpConnection.CONNECTION_CLOSE);
+                if (_error != null)
+                    _readListener.onError(_error);
+                else
+                    _readListener.onError(new EofException("Early EOF"));
+            }
+            else if (_eof.isEof())
+            {
+                try
+                {
+                    _readListener.onAllDataRead();
+                }
+                catch (Throwable x)
+                {
+                    if (LOG.isDebugEnabled())
+                        LOG.debug("running failed onAllDataRead", x);
+                    _readListener.onError(x);
+                }
+            }
+            // else: !hasContent() && !error && !EOF -> no-op
+        }
+        else
+        {
+            if (LOG.isDebugEnabled())
+                LOG.debug("running has raw content");
+            try
+            {
+                _readListener.onDataAvailable();
+            }
+            catch (Throwable x)
+            {
+                if (LOG.isDebugEnabled())
+                    LOG.debug("running failed onDataAvailable", x);
+                _readListener.onError(x);
+            }
+        }
+    }
+
+    private void produceContent()
+    {
+        if (LOG.isDebugEnabled())
+            LOG.debug("produceContent {}", _contentProducer);
+        _channelState.getHttpChannel().produceContent();
+    }
+
+    private void failContent(Throwable failure)
+    {
+        if (LOG.isDebugEnabled())
+            LOG.debug("failContent {} - " + failure, _contentProducer);
+        _channelState.getHttpChannel().failContent(failure);
+    }
+
+    private enum Eof
+    {
+        NOT_YET(false, false, false),
+        EOF(true, false, false),
+        CONSUMED_EOF(true, true, false),
+        EARLY_EOF(true, false, true),
+        ;
+
+        private final boolean _eof;
+        private final boolean _consumed;
+        private final boolean _early;
+
+        Eof(boolean eof, boolean consumed, boolean early)
+        {
+            _eof = eof;
+            _consumed = consumed;
+            _early = early;
+        }
+
+        boolean isEof()
+        {
+            return _eof;
+        }
+
+        boolean isConsumed()
+        {
+            return _consumed;
+        }
+
+        boolean isEarly()
+        {
+            return _early;
+        }
+    }
+
+    // All methods of this class have to be synchronized because a HTTP2 reset can call consumeTransformedContent()
+    // while nextNonEmptyContent() is executing, hence all accesses to _rawContent and _transformedContent must be
+    // mutually excluded.
+    // TODO: maybe the locking could be more fine grained, by only protecting the if (null|!null) blocks?
+    private static class ContentProducer
+    {
+        // Note: _rawContent can never be null for as long as _transformedContent is not null.
+        private Content _rawContent;
+        private Content _transformedContent;
+        private long _rawContentArrived;
+        private Interceptor _interceptor;
+        private Throwable _consumeFailure;
+
+        void recycle()
+        {
+            synchronized (this)
+            {
+                if (LOG.isDebugEnabled())
+                    LOG.debug("recycle {}", this);
+                if (_transformedContent == _rawContent)
+                    _transformedContent = null;
+                if (_transformedContent != null)
+                    _transformedContent.failed(null);
+                _transformedContent = null;
+                if (_rawContent != null)
+                    _rawContent.failed(null);
+                _rawContent = null;
+                _rawContentArrived = 0L;
+                if (_interceptor instanceof Destroyable)
+                    ((Destroyable)_interceptor).destroy();
+                _interceptor = null;
+                _consumeFailure = null;
+            }
+        }
+
+        long getRawContentArrived()
+        {
+            synchronized (this)
+            {
+                return _rawContentArrived;
+            }
+        }
+
+        boolean hasRawContent()
+        {
+            synchronized (this)
+            {
+                return _rawContent != null;
+            }
+        }
+
+        Interceptor getInterceptor()
+        {
+            synchronized (this)
+            {
+                return _interceptor;
+            }
+        }
+
+        void setInterceptor(Interceptor interceptor)
+        {
+            synchronized (this)
+            {
+                this._interceptor = interceptor;
+            }
+        }
+
+        void addContent(Content content)
+        {
+            synchronized (this)
+            {
+                if (LOG.isDebugEnabled())
+                    LOG.debug("{} addContent {}", this, content);
+                if (content == null)
+                    throw new AssertionError("Cannot add null content");
+                if (_consumeFailure != null)
+                {
+                    content.failed(_consumeFailure);
+                    return;
+                }
+                if (_rawContent != null)
+                    throw new AssertionError("Cannot add new content while current one hasn't been processed");
+
+                _rawContent = content;
+                _rawContentArrived += content.remaining();
+            }
+        }
+
+        void consumeTransformedContent(Consumer<Throwable> failRawContent, Throwable failure)
+        {
+            synchronized (this)
+            {
+                if (LOG.isDebugEnabled())
+                    LOG.debug("{} consumeTransformedContent", this);
+                // start by depleting the current _transformedContent
+                if (_transformedContent != null)
+                {
+                    _transformedContent.skip(_transformedContent.remaining());
+                    if (_transformedContent != _rawContent)
+                        _transformedContent.failed(failure);
+                    _transformedContent = null;
+                }
+
+                // don't bother transforming content, directly deplete the raw one
+                if (_rawContent != null)
+                {
+                    _rawContent.skip(_rawContent.remaining());
+                    _rawContent.failed(failure);
+                    _rawContent = null;
+                }
+
+                // fail whatever other content the producer may have
+                _consumeFailure = failure;
+                failRawContent.accept(failure);
+            }
+        }
+
+        int available(Runnable rawContentProducer)
+        {
+            synchronized (this)
+            {
+                Content content = nextNonEmptyContent(rawContentProducer);
+                return content == null ? 0 : content.remaining();
+            }
+        }
+
+        int read(Runnable rawContentProducer, byte[] b, int off, int len)
+        {
+            synchronized (this)
+            {
+                if (LOG.isDebugEnabled())
+                    LOG.debug("{} read", this);
+                Content content = nextNonEmptyContent(rawContentProducer);
+                return content == null ? 0 : content.get(b, off, len);
+            }
+        }
+
+        private Content nextNonEmptyContent(Runnable rawContentProducer)
+        {
+            if (_rawContent == null)
+            {
+                rawContentProducer.run();
+                if (_rawContent == null)
+                    return null;
+            }
+
+            if (_transformedContent != null && _transformedContent.isEmpty())
+            {
+                if (_transformedContent != _rawContent)
+                    _transformedContent.succeeded();
+                _transformedContent = null;
+            }
+
+            while (_transformedContent == null)
+            {
+                if (_interceptor != null)
+                    _transformedContent = _interceptor.readFrom(_rawContent);
+                else
+                    _transformedContent = _rawContent;
+
+                if (_transformedContent != null && _transformedContent.isEmpty())
+                {
+                    if (_transformedContent != _rawContent)
+                        _transformedContent.succeeded();
+                    _transformedContent = null;
+                }
+
+                if (_transformedContent == null)
+                {
+                    if (_rawContent.isEmpty())
+                    {
+                        _rawContent.succeeded();
+                        _rawContent = null;
+                        rawContentProducer.run();
+                        if (_rawContent == null)
+                            return null;
+                    }
+                }
+            }
+
+            return _transformedContent;
+        }
+
+        @Override
+        public String toString()
+        {
+            return getClass().getSimpleName() + "[i=" + _interceptor + ",b=" + _rawContentArrived +
+                ",r=" + _rawContent + ",t=" + _transformedContent + "]";
+        }
     }
 
     /**
@@ -84,23 +754,23 @@ public class HttpInput extends ServletInputStream implements Runnable
      * {@link Interceptor#readFrom(Content)} and then passes any {@link Content} returned
      * to the next {@link Interceptor}.
      */
-    public static class ChainedInterceptor implements Interceptor, Destroyable
+    private static class ChainedInterceptor implements Interceptor, Destroyable
     {
         private final Interceptor _prev;
         private final Interceptor _next;
 
-        public ChainedInterceptor(Interceptor prev, Interceptor next)
+        ChainedInterceptor(Interceptor prev, Interceptor next)
         {
             _prev = prev;
             _next = next;
         }
 
-        public Interceptor getPrev()
+        Interceptor getPrev()
         {
             return _prev;
         }
 
-        public Interceptor getNext()
+        Interceptor getNext()
         {
             return _next;
         }
@@ -108,7 +778,10 @@ public class HttpInput extends ServletInputStream implements Runnable
         @Override
         public Content readFrom(Content content)
         {
-            return getNext().readFrom(getPrev().readFrom(content));
+            Content c = getPrev().readFrom(content);
+            if (c == null)
+                return null;
+            return getNext().readFrom(c);
         }
 
         @Override
@@ -121,850 +794,15 @@ public class HttpInput extends ServletInputStream implements Runnable
         }
     }
 
-    private static final Logger LOG = LoggerFactory.getLogger(HttpInput.class);
-    static final Content EOF_CONTENT = new EofContent("EOF");
-    static final Content EARLY_EOF_CONTENT = new EofContent("EARLY_EOF");
-
-    private final byte[] _oneByteBuffer = new byte[1];
-    private Content _content;
-    private Content _intercepted;
-    private final Deque<Content> _inputQ = new ArrayDeque<>();
-    private final HttpChannelState _channelState;
-    private ReadListener _listener;
-    private State _state = STREAM;
-    private long _firstByteTimeStamp = -1;
-    private long _contentArrived;
-    private long _contentConsumed;
-    private long _blockUntil;
-    private boolean _waitingForContent;
-    private Interceptor _interceptor;
-
-    public HttpInput(HttpChannelState state)
+    public interface Interceptor
     {
-        _channelState = state;
-    }
-
-    protected HttpChannelState getHttpChannelState()
-    {
-        return _channelState;
-    }
-
-    public void recycle()
-    {
-        synchronized (_inputQ)
-        {
-            if (_content != null)
-                _content.failed(null);
-            _content = null;
-            Content item = _inputQ.poll();
-            while (item != null)
-            {
-                item.failed(null);
-                item = _inputQ.poll();
-            }
-            _listener = null;
-            _state = STREAM;
-            _contentArrived = 0;
-            _contentConsumed = 0;
-            _firstByteTimeStamp = -1;
-            _blockUntil = 0;
-            _waitingForContent = false;
-            if (_interceptor instanceof Destroyable)
-                ((Destroyable)_interceptor).destroy();
-            _interceptor = null;
-        }
-    }
-
-    /**
-     * @return The current Interceptor, or null if none set
-     */
-    public Interceptor getInterceptor()
-    {
-        return _interceptor;
-    }
-
-    /**
-     * Set the interceptor.
-     *
-     * @param interceptor The interceptor to use.
-     */
-    public void setInterceptor(Interceptor interceptor)
-    {
-        _interceptor = interceptor;
-    }
-
-    /**
-     * Set the {@link Interceptor}, using a {@link ChainedInterceptor} if
-     * an {@link Interceptor} is already set.
-     *
-     * @param interceptor the next {@link Interceptor} in a chain
-     */
-    public void addInterceptor(Interceptor interceptor)
-    {
-        if (_interceptor == null)
-            _interceptor = interceptor;
-        else
-            _interceptor = new ChainedInterceptor(_interceptor, interceptor);
-    }
-
-    @Override
-    public int available()
-    {
-        int available = 0;
-        boolean woken = false;
-        synchronized (_inputQ)
-        {
-            if (_content == null)
-                _content = _inputQ.poll();
-            if (_content == null)
-            {
-                try
-                {
-                    produceContent();
-                }
-                catch (IOException e)
-                {
-                    woken = failed(e);
-                }
-                if (_content == null)
-                    _content = _inputQ.poll();
-            }
-
-            if (_content != null)
-                available = _content.remaining();
-        }
-
-        if (woken)
-            wake();
-        return available;
-    }
-
-    protected void wake()
-    {
-        HttpChannel channel = _channelState.getHttpChannel();
-        Executor executor = channel.getConnector().getServer().getThreadPool();
-        executor.execute(channel);
-    }
-
-    @Override
-    public int read() throws IOException
-    {
-        int read = read(_oneByteBuffer, 0, 1);
-        if (read == 0)
-            throw new IllegalStateException("unready read=0");
-        return read < 0 ? -1 : _oneByteBuffer[0] & 0xFF;
-    }
-
-    @Override
-    public int read(byte[] b, int off, int len) throws IOException
-    {
-        boolean wake = false;
-        int l;
-        synchronized (_inputQ)
-        {
-            // Calculate minimum request rate for DOS protection
-            long minRequestDataRate = _channelState.getHttpChannel().getHttpConfiguration().getMinRequestDataRate();
-            if (minRequestDataRate > 0 && _firstByteTimeStamp != -1)
-            {
-                long period = System.nanoTime() - _firstByteTimeStamp;
-                if (period > 0)
-                {
-                    long minimumData = minRequestDataRate * TimeUnit.NANOSECONDS.toMillis(period) / TimeUnit.SECONDS.toMillis(1);
-                    if (_contentArrived < minimumData)
-                    {
-                        BadMessageException bad = new BadMessageException(HttpStatus.REQUEST_TIMEOUT_408,
-                            String.format("Request content data rate < %d B/s", minRequestDataRate));
-                        if (_channelState.isResponseCommitted())
-                            _channelState.getHttpChannel().abort(bad);
-                        throw bad;
-                    }
-                }
-            }
-
-            // Consume content looking for bytes to read
-            while (true)
-            {
-                Content item = nextContent();
-                if (item != null)
-                {
-                    l = get(item, b, off, len);
-                    if (LOG.isDebugEnabled())
-                        LOG.debug("{} read {} from {}", this, l, item);
-
-                    // Consume any following poison pills
-                    if (item.isEmpty())
-                        nextInterceptedContent();
-                    break;
-                }
-
-                // No content, so should we block?
-                if (!_state.blockForContent(this))
-                {
-                    // Not blocking, so what should we return?
-                    l = _state.noContent();
-
-                    if (l < 0)
-                        // If EOF do we need to wake for allDataRead callback?
-                        wake = _channelState.onReadEof();
-                    break;
-                }
-            }
-        }
-
-        if (wake)
-            wake();
-        return l;
-    }
-
-    /**
-     * Called when derived implementations should attempt to produce more Content and add it via {@link #addContent(Content)}. For protocols that are constantly
-     * producing (eg HTTP2) this can be left as a noop;
-     *
-     * @throws IOException if unable to produce content
-     */
-    protected void produceContent() throws IOException
-    {
-    }
-
-    /**
-     * Called by channel when asynchronous IO needs to produce more content
-     *
-     * @throws IOException if unable to produce content
-     */
-    public void asyncReadProduce() throws IOException
-    {
-        synchronized (_inputQ)
-        {
-            produceContent();
-        }
-    }
-
-    /**
-     * Get the next content from the inputQ, calling {@link #produceContent()} if need be. EOF is processed and state changed.
-     *
-     * @return the content or null if none available.
-     * @throws IOException if retrieving the content fails
-     */
-    protected Content nextContent() throws IOException
-    {
-        Content content = nextNonSentinelContent();
-        if (content == null && !isFinished())
-        {
-            produceContent();
-            content = nextNonSentinelContent();
-        }
-        return content;
-    }
-
-    /**
-     * Poll the inputQ for Content. Consumed buffers and {@link SentinelContent}s are removed and EOF state updated if need be.
-     *
-     * @return Content or null
-     */
-    protected Content nextNonSentinelContent()
-    {
-        while (true)
-        {
-            // Get the next content (or EOF)
-            Content content = nextInterceptedContent();
-
-            // If it is EOF, consume it here
-            if (content instanceof SentinelContent)
-            {
-                // Consume the EOF content, either if it was original content
-                // or if it was produced by interception
-                consume(content);
-                continue;
-            }
-
-            return content;
-        }
-    }
-
-    /**
-     * Get the next readable from the inputQ, calling {@link #produceContent()} if need be. EOF is NOT processed and state is not changed.
-     *
-     * @return the content or EOF or null if none available.
-     * @throws IOException if retrieving the content fails
-     */
-    protected Content produceNextContext() throws IOException
-    {
-        Content content = nextInterceptedContent();
-        if (content == null && !isFinished())
-        {
-            produceContent();
-            content = nextInterceptedContent();
-        }
-        return content;
-    }
-
-    /**
-     * Poll the inputQ for Content or EOF. Consumed buffers and non EOF {@link SentinelContent}s are removed. EOF state is not updated.
-     * Interception is done within this method.
-     *
-     * @return Content with remaining, a {@link SentinelContent},  or null
-     */
-    protected Content nextInterceptedContent()
-    {
-        // If we have a chunk produced by interception
-        if (_intercepted != null)
-        {
-            // Use it if it has any remaining content
-            if (_intercepted.hasContent())
-                return _intercepted;
-
-            // succeed the chunk
-            _intercepted.succeeded();
-            _intercepted = null;
-        }
-
-        // If we don't have a Content under consideration, get
-        // the next one off the input Q.
-        if (_content == null)
-            _content = _inputQ.poll();
-
-        // While we have content to consider.
-        while (_content != null)
-        {
-            // Are we intercepting?
-            if (_interceptor != null)
-            {
-                // Intercept the current content (may be called several
-                // times for the same content
-                _intercepted = _interceptor.readFrom(_content);
-
-                // If interception produced new content
-                if (_intercepted != null && _intercepted != _content)
-                {
-                    // if it is not empty use it
-                    if (_intercepted.hasContent())
-                        return _intercepted;
-                    _intercepted.succeeded();
-                }
-
-                // intercepted content consumed
-                _intercepted = null;
-
-                // fall through so that the unintercepted _content is
-                // considered for any remaining content, for EOF and to
-                // succeed it if it is entirely consumed.
-            }
-
-            // If the content has content or is an EOF marker, use it
-            if (_content.hasContent() || _content instanceof SentinelContent)
-                return _content;
-
-            // The content is consumed, so get the next one.  Note that EOF
-            // content is never consumed here, but in #pollContent
-            _content.succeeded();
-            _content = _inputQ.poll();
-        }
-
-        return null;
-    }
-
-    private void consume(Content content)
-    {
-        if (!isError() && content instanceof EofContent)
-        {
-            if (content == EARLY_EOF_CONTENT)
-                _state = EARLY_EOF;
-            else if (_listener == null)
-                _state = EOF;
-            else
-                _state = AEOF;
-        }
-
-        // Consume the content, either if it was original content
-        // or if it was produced by interception
-        content.succeeded();
-        if (_content == content)
-            _content = null;
-        else if (_intercepted == content)
-            _intercepted = null;
-    }
-
-    /**
-     * Copies the given content into the given byte buffer.
-     *
-     * @param content the content to copy from
-     * @param buffer the buffer to copy into
-     * @param offset the buffer offset to start copying from
-     * @param length the space available in the buffer
-     * @return the number of bytes actually copied
-     */
-    protected int get(Content content, byte[] buffer, int offset, int length)
-    {
-        int l = content.get(buffer, offset, length);
-        _contentConsumed += l;
-        return l;
-    }
-
-    /**
-     * Consumes the given content. Calls the content succeeded if all content consumed.
-     *
-     * @param content the content to consume
-     * @param length the number of bytes to consume
-     */
-    protected void skip(Content content, int length)
-    {
-        int l = content.skip(length);
-
-        _contentConsumed += l;
-        if (l > 0 && content.isEmpty())
-            nextNonSentinelContent(); // hungry succeed
-    }
-
-    /**
-     * Blocks until some content or some end-of-file event arrives.
-     *
-     * @throws IOException if the wait is interrupted
-     */
-    protected void blockForContent() throws IOException
-    {
-        try
-        {
-            _waitingForContent = true;
-            _channelState.getHttpChannel().onBlockWaitForContent();
-
-            boolean loop = false;
-            long timeout = 0;
-            while (true)
-            {
-                // This method is called from a loop, so we just
-                // need to check the timeout before and after waiting.
-                if (loop)
-                    break;
-
-                if (LOG.isDebugEnabled())
-                    LOG.debug("{} blocking for content timeout={}", this, timeout);
-                if (timeout > 0)
-                    _inputQ.wait(timeout);
-                else
-                    _inputQ.wait();
-
-                loop = true;
-            }
-        }
-        catch (Throwable x)
-        {
-            _channelState.getHttpChannel().onBlockWaitForContentFailure(x);
-        }
-    }
-
-    /**
-     * Adds some content to this input stream.
-     *
-     * @param content the content to add
-     * @return true if content channel woken for read
-     */
-    public boolean addContent(Content content)
-    {
-        synchronized (_inputQ)
-        {
-            _waitingForContent = false;
-            if (_firstByteTimeStamp == -1)
-                _firstByteTimeStamp = System.nanoTime();
-
-            if (isFinished())
-            {
-                Throwable failure = isError() ? _state.getError() : new EOFException("Content after EOF");
-                content.failed(failure);
-                return false;
-            }
-            else
-            {
-                _contentArrived += content.remaining();
-
-                if (_content == null && _inputQ.isEmpty())
-                    _content = content;
-                else
-                    _inputQ.offer(content);
-
-                if (LOG.isDebugEnabled())
-                    LOG.debug("{} addContent {}", this, content);
-
-                if (nextInterceptedContent() != null)
-                    return wakeup();
-                else
-                    return false;
-            }
-        }
-    }
-
-    public boolean hasContent()
-    {
-        synchronized (_inputQ)
-        {
-            return _content != null || _inputQ.size() > 0;
-        }
-    }
-
-    public void unblock()
-    {
-        synchronized (_inputQ)
-        {
-            _inputQ.notify();
-        }
-    }
-
-    public long getContentConsumed()
-    {
-        synchronized (_inputQ)
-        {
-            return _contentConsumed;
-        }
-    }
-
-    /**
-     * This method should be called to signal that an EOF has been detected before all the expected content arrived.
-     * <p>
-     * Typically this will result in an EOFException being thrown from a subsequent read rather than a -1 return.
-     *
-     * @return true if content channel woken for read
-     */
-    public boolean earlyEOF()
-    {
-        return addContent(EARLY_EOF_CONTENT);
-    }
-
-    /**
-     * This method should be called to signal that all the expected content arrived.
-     *
-     * @return true if content channel woken for read
-     */
-    public boolean eof()
-    {
-        return addContent(EOF_CONTENT);
-    }
-
-    public boolean consumeAll()
-    {
-        synchronized (_inputQ)
-        {
-            try
-            {
-                while (true)
-                {
-                    Content item = nextContent();
-                    if (item == null)
-                        break; // Let's not bother blocking
-
-                    skip(item, item.remaining());
-                }
-                if (isFinished())
-                    return !isError();
-
-                _state = EARLY_EOF;
-                return false;
-            }
-            catch (Throwable e)
-            {
-                LOG.debug("Unable to consume all input", e);
-                _state = new ErrorState(e);
-                return false;
-            }
-        }
-    }
-
-    public boolean isError()
-    {
-        synchronized (_inputQ)
-        {
-            return _state instanceof ErrorState;
-        }
-    }
-
-    public boolean isAsync()
-    {
-        synchronized (_inputQ)
-        {
-            return _state == ASYNC;
-        }
-    }
-
-    @Override
-    public boolean isFinished()
-    {
-        synchronized (_inputQ)
-        {
-            return _state instanceof EOFState;
-        }
-    }
-
-    @Override
-    public boolean isReady()
-    {
-        try
-        {
-            synchronized (_inputQ)
-            {
-                if (_listener == null)
-                    return true;
-                if (_state instanceof EOFState)
-                    return true;
-                if (_waitingForContent)
-                    return false;
-                if (produceNextContext() != null)
-                    return true;
-                _channelState.onReadUnready();
-                _waitingForContent = true;
-            }
-            return false;
-        }
-        catch (IOException e)
-        {
-            LOG.trace("IGNORED", e);
-            return true;
-        }
-    }
-
-    @Override
-    public void setReadListener(ReadListener readListener)
-    {
-        boolean woken = false;
-        try
-        {
-            synchronized (_inputQ)
-            {
-                if (_listener != null)
-                    throw new IllegalStateException("ReadListener already set");
-
-                _listener = Objects.requireNonNull(readListener);
-
-                //illegal if async not started
-                if (!_channelState.isAsyncStarted())
-                    throw new IllegalStateException("Async not started");
-
-                if (isError())
-                {
-                    woken = _channelState.onReadReady();
-                }
-                else
-                {
-                    Content content = produceNextContext();
-                    if (content != null)
-                    {
-                        _state = ASYNC;
-                        woken = _channelState.onReadReady();
-                    }
-                    else if (_state == EOF)
-                    {
-                        _state = AEOF;
-                        woken = _channelState.onReadEof();
-                    }
-                    else
-                    {
-                        _state = ASYNC;
-                        _channelState.onReadUnready();
-                        _waitingForContent = true;
-                    }
-                }
-            }
-        }
-        catch (IOException e)
-        {
-            throw new RuntimeIOException(e);
-        }
-
-        if (woken)
-            wake();
-    }
-
-    public boolean onIdleTimeout(Throwable x)
-    {
-        synchronized (_inputQ)
-        {
-            boolean neverDispatched = getHttpChannelState().isIdle();
-            if ((_waitingForContent || neverDispatched) && !isError())
-            {
-                x.addSuppressed(new Throwable("HttpInput idle timeout"));
-                _state = new ErrorState(x);
-                return wakeup();
-            }
-            return false;
-        }
-    }
-
-    public boolean failed(Throwable x)
-    {
-        synchronized (_inputQ)
-        {
-            // Errors may be reported multiple times, for example
-            // a local idle timeout and a remote I/O failure.
-            if (isError())
-            {
-                if (LOG.isDebugEnabled())
-                {
-                    // Log both the original and current failure
-                    // without modifying the original failure.
-                    Throwable failure = new Throwable(_state.getError());
-                    failure.addSuppressed(x);
-                    LOG.debug("HttpInput failure", failure);
-                }
-            }
-            else
-            {
-                // Add a suppressed throwable to capture this stack
-                // trace without wrapping/hiding the original failure.
-                x.addSuppressed(new Throwable("HttpInput failure"));
-                _state = new ErrorState(x);
-            }
-            return wakeup();
-        }
-    }
-
-    private boolean wakeup()
-    {
-        if (_listener != null)
-            return _channelState.onContentAdded();
-        _inputQ.notify();
-        return false;
-    }
-
-    /*
-     * <p> While this class is-a Runnable, it should never be dispatched in it's own thread. It is a runnable only so that the calling thread can use {@link
-     * ContextHandler#handle(Runnable)} to setup classloaders etc. </p>
-     */
-    @Override
-    public void run()
-    {
-        final ReadListener listener;
-        Throwable error;
-        boolean aeof = false;
-
-        synchronized (_inputQ)
-        {
-            listener = _listener;
-
-            if (_state == EOF)
-                return;
-
-            if (_state == AEOF)
-            {
-                _state = EOF;
-                aeof = true;
-            }
-
-            error = _state.getError();
-
-            if (!aeof && error == null)
-            {
-                Content content = nextInterceptedContent();
-                if (content == null)
-                    return;
-
-                // Consume a directly received EOF without first calling onDataAvailable
-                // So -1 will never be read and only onAddDataRread or onError will be called
-                if (content instanceof EofContent)
-                {
-                    consume(content);
-                    if (_state == EARLY_EOF)
-                        error = _state.getError();
-                    else if (_state == AEOF)
-                    {
-                        aeof = true;
-                        _state = EOF;
-                    }
-                }
-            }
-        }
-
-        try
-        {
-            if (error != null)
-            {
-                // TODO is this necessary to add here?
-                _channelState.getHttpChannel().getResponse().getHttpFields().add(HttpConnection.CONNECTION_CLOSE);
-                listener.onError(error);
-            }
-            else if (aeof)
-            {
-                listener.onAllDataRead();
-            }
-            else
-            {
-                listener.onDataAvailable();
-                // If -1 was read, then HttpChannelState#onEOF will have been called and a subsequent
-                // unhandle will call run again so onAllDataRead() can be called.
-            }
-        }
-        catch (Throwable e)
-        {
-            if (LOG.isDebugEnabled())
-                LOG.warn("Unable to notify listener", e);
-            else
-                LOG.warn("Unable to notify listener: {}", e.toString());
-            try
-            {
-                if (aeof || error == null)
-                {
-                    _channelState.getHttpChannel().getResponse().getHttpFields().add(HttpConnection.CONNECTION_CLOSE);
-                    listener.onError(e);
-                }
-            }
-            catch (Throwable e2)
-            {
-                String msg = "Unable to notify error to listener";
-                if (LOG.isDebugEnabled())
-                    LOG.warn(msg, e2);
-                else
-                    LOG.warn(msg + ": {}", e2.toString());
-                throw new RuntimeIOException(msg, e2);
-            }
-        }
-    }
-
-    @Override
-    public String toString()
-    {
-        State state;
-        long consumed;
-        int q;
-        Content content;
-        synchronized (_inputQ)
-        {
-            state = _state;
-            consumed = _contentConsumed;
-            q = _inputQ.size();
-            content = _inputQ.peekFirst();
-        }
-        return String.format("%s@%x[c=%d,q=%d,[0]=%s,s=%s]",
-            getClass().getSimpleName(),
-            hashCode(),
-            consumed,
-            q,
-            content,
-            state);
-    }
-
-    /**
-     * A Sentinel Content, which has zero length content but
-     * indicates some other event in the input stream (eg EOF)
-     */
-    public static class SentinelContent extends Content
-    {
-        private final String _name;
-
-        public SentinelContent(String name)
-        {
-            super(BufferUtil.EMPTY_BUFFER);
-            _name = name;
-        }
-
-        @Override
-        public String toString()
-        {
-            return _name;
-        }
-    }
-
-    public static class EofContent extends SentinelContent
-    {
-        EofContent(String name)
-        {
-            super(name);
-        }
+        /**
+         * @param content The content to be intercepted.
+         * The content will be modified with any data the interceptor consumes, but there is no requirement
+         * that all the data is consumed by the interceptor.
+         * @return The intercepted content or null if interception is completed for that content.
+         */
+        Content readFrom(Content content);
     }
 
     public static class Content implements Callback
@@ -1023,125 +861,4 @@ public class HttpInput extends ServletInputStream implements Runnable
         }
     }
 
-    protected abstract static class State
-    {
-        public boolean blockForContent(HttpInput in) throws IOException
-        {
-            return false;
-        }
-
-        public int noContent() throws IOException
-        {
-            return -1;
-        }
-
-        public Throwable getError()
-        {
-            return null;
-        }
-    }
-
-    protected static class EOFState extends State
-    {
-    }
-
-    protected class ErrorState extends EOFState
-    {
-        final Throwable _error;
-
-        ErrorState(Throwable error)
-        {
-            _error = error;
-        }
-
-        @Override
-        public Throwable getError()
-        {
-            return _error;
-        }
-
-        @Override
-        public int noContent() throws IOException
-        {
-            if (_error instanceof IOException)
-                throw (IOException)_error;
-            throw new IOException(_error);
-        }
-
-        @Override
-        public String toString()
-        {
-            return "ERROR:" + _error;
-        }
-    }
-
-    protected static final State STREAM = new State()
-    {
-        @Override
-        public boolean blockForContent(HttpInput input) throws IOException
-        {
-            input.blockForContent();
-            return true;
-        }
-
-        @Override
-        public String toString()
-        {
-            return "STREAM";
-        }
-    };
-
-    protected static final State ASYNC = new State()
-    {
-        @Override
-        public int noContent() throws IOException
-        {
-            return 0;
-        }
-
-        @Override
-        public String toString()
-        {
-            return "ASYNC";
-        }
-    };
-
-    protected static final State EARLY_EOF = new EOFState()
-    {
-        @Override
-        public int noContent() throws IOException
-        {
-            throw getError();
-        }
-
-        @Override
-        public String toString()
-        {
-            return "EARLY_EOF";
-        }
-
-        @Override
-        public IOException getError()
-        {
-            return new EofException("Early EOF");
-        }
-    };
-
-    protected static final State EOF = new EOFState()
-    {
-        @Override
-        public String toString()
-        {
-            return "EOF";
-        }
-    };
-
-    protected static final State AEOF = new EOFState()
-    {
-        @Override
-        public String toString()
-        {
-            return "AEOF";
-        }
-    };
 }

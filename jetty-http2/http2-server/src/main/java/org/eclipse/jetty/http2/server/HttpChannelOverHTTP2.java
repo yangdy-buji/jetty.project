@@ -131,9 +131,17 @@ public class HttpChannelOverHTTP2 extends HttpChannel implements Closeable, Writ
             _delayedUntilContent = getHttpConfiguration().isDelayDispatchUntilContent() &&
                     !endStream && !_expect100Continue && !connect;
 
-            // Delay the demand of DATA frames for CONNECT with :protocol.
-            if (!connect || request.getProtocol() == null)
+            // Delay the demand of DATA frames for CONNECT with :protocol
+            // or for normal requests expecting 100 continue.
+            if (!connect)
+            {
+                if (!_expect100Continue)
+                    getStream().demand(1);
+            }
+            else if (request.getProtocol() == null)
+            {
                 getStream().demand(1);
+            }
 
             if (LOG.isDebugEnabled())
             {
@@ -208,6 +216,17 @@ public class HttpChannelOverHTTP2 extends HttpChannel implements Closeable, Writ
         getHttpTransport().recycle();
     }
 
+    public void onAsyncWaitForContent()
+    {
+        getStream().demand(1);
+    }
+
+    @Override
+    public void onBlockWaitForContent()
+    {
+        getStream().demand(1);
+    }
+
     @Override
     protected void commit(MetaData.Response info)
     {
@@ -271,19 +290,47 @@ public class HttpChannelOverHTTP2 extends HttpChannel implements Closeable, Writ
             handle |= handleContent | handleRequest;
         }
 
+        boolean woken = false;
+        if (getState().isAsync())
+        {
+            woken = getState().onReadPossible();
+            handle |= woken;
+        }
+        else
+        {
+            getRequest().getHttpInput().unblock();
+        }
+
         if (LOG.isDebugEnabled())
         {
-            LOG.debug("HTTP2 Request #{}/{}: {} bytes of {} content, handle: {}",
+            LOG.debug("HTTP2 Request #{}/{}: {} bytes of {} content, woken? {}, handle: {}",
                     stream.getId(),
                     Integer.toHexString(stream.getSession().hashCode()),
                     length,
                     endStream ? "last" : "some",
+                    woken,
                     handle);
         }
 
         boolean wasDelayed = _delayedUntilContent;
         _delayedUntilContent = false;
         return handle || wasDelayed ? this : null;
+    }
+
+    @Override
+    public void produceContent()
+    {
+        // HttpInputOverHttp2 calls this method via produceRawContent();
+        // this is the equivalent of Http1 parseAndFill().
+
+        if (getStream().available() > 0)
+            getStream().demand(1);
+    }
+
+    @Override
+    public void failContent(Throwable failure)
+    {
+        getStream().fail(failure);
     }
 
     @Override

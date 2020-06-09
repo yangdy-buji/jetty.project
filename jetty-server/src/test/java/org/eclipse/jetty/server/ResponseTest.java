@@ -175,7 +175,18 @@ public class ResponseTest
             {
                 _channelError = failure;
             }
-        });
+        })
+        {
+            @Override
+            public void produceContent()
+            {
+            }
+
+            @Override
+            public void failContent(Throwable failure)
+            {
+            }
+        };
     }
 
     @AfterEach

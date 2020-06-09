@@ -74,6 +74,7 @@ public class HTTP2Stream extends IdleTimeout implements IStream, Callback, Dumpa
     private boolean remoteReset;
     private long dataLength;
     private long dataDemand;
+    private Throwable failure;
     private boolean dataInitial;
     private boolean dataProcess;
 
@@ -190,6 +191,23 @@ public class HTTP2Stream extends IdleTimeout implements IStream, Callback, Dumpa
     {
         CloseState state = closeState.get();
         return state == CloseState.REMOTELY_CLOSED || state == CloseState.CLOSING || state == CloseState.CLOSED;
+    }
+
+    @Override
+    public void fail(Throwable x)
+    {
+        try (AutoLock l = lock.lock())
+        {
+            dataDemand = 0;
+            failure = x;
+            while (true)
+            {
+                DataEntry dataEntry = dataQueue.poll();
+                if (dataEntry == null)
+                    break;
+                dataEntry.callback.failed(x);
+            }
+        }
     }
 
     public boolean isLocallyClosed()
@@ -357,6 +375,12 @@ public class HTTP2Stream extends IdleTimeout implements IStream, Callback, Dumpa
         DataEntry entry = new DataEntry(frame, callback);
         try (AutoLock l = lock.lock())
         {
+            if (failure != null)
+            {
+                // stream has been failed
+                callback.failed(failure);
+                return;
+            }
             dataQueue.offer(entry);
             initial = dataInitial;
             if (initial)
@@ -396,6 +420,8 @@ public class HTTP2Stream extends IdleTimeout implements IStream, Callback, Dumpa
         boolean proceed = false;
         try (AutoLock l = lock.lock())
         {
+            if (failure != null)
+                return; // stream has been failed
             demand = dataDemand = MathUtils.cappedAdd(dataDemand, n);
             if (!dataProcess)
                 dataProcess = proceed = !dataQueue.isEmpty();
@@ -427,6 +453,14 @@ public class HTTP2Stream extends IdleTimeout implements IStream, Callback, Dumpa
             if (updateClose(frame.isEndStream(), CloseState.Event.RECEIVED))
                 session.removeStream(this);
             notifyDataDemanded(this, frame, dataEntry.callback);
+        }
+    }
+
+    public int available()
+    {
+        try (AutoLock l = lock.lock())
+        {
+            return dataQueue.size();
         }
     }
 

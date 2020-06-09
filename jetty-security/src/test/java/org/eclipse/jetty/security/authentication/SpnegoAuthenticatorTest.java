@@ -63,6 +63,16 @@ public class SpnegoAuthenticatorTest
             }
 
             @Override
+            public void produceContent()
+            {
+            }
+
+            @Override
+            public void failContent(Throwable failure)
+            {
+            }
+
+            @Override
             protected HttpOutput newHttpOutput()
             {
                 return new HttpOutput(this)
@@ -95,6 +105,16 @@ public class SpnegoAuthenticatorTest
             public Server getServer()
             {
                 return null;
+            }
+
+            @Override
+            public void produceContent()
+            {
+            }
+
+            @Override
+            public void failContent(Throwable failure)
+            {
             }
 
             @Override

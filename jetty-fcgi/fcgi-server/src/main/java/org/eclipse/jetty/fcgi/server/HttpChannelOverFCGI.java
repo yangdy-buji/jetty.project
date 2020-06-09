@@ -18,7 +18,11 @@
 
 package org.eclipse.jetty.fcgi.server;
 
+import java.util.ArrayList;
+import java.util.LinkedList;
+import java.util.List;
 import java.util.Locale;
+import java.util.Queue;
 import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -34,6 +38,7 @@ import org.eclipse.jetty.io.EndPoint;
 import org.eclipse.jetty.server.Connector;
 import org.eclipse.jetty.server.HttpChannel;
 import org.eclipse.jetty.server.HttpConfiguration;
+import org.eclipse.jetty.server.HttpInput;
 import org.eclipse.jetty.server.HttpTransport;
 import org.eclipse.jetty.util.StringUtil;
 import org.slf4j.Logger;
@@ -43,6 +48,8 @@ public class HttpChannelOverFCGI extends HttpChannel
 {
     private static final Logger LOG = LoggerFactory.getLogger(HttpChannelOverFCGI.class);
 
+    private final Queue<HttpInput.Content> _contentQueue = new LinkedList<>();
+    private Throwable _contentFailure;
     private final HttpFields.Mutable fields = HttpFields.build();
     private final Dispatcher dispatcher;
     private String method;
@@ -55,6 +62,51 @@ public class HttpChannelOverFCGI extends HttpChannel
     {
         super(connector, configuration, endPoint, transport);
         this.dispatcher = new Dispatcher(connector.getServer().getThreadPool(), this);
+    }
+
+    void enqueueContent(HttpInput.Content content)
+    {
+        Throwable failure;
+        synchronized (_contentQueue)
+        {
+            failure = _contentFailure;
+            if (failure == null)
+                _contentQueue.offer(content);
+        }
+        if (failure != null)
+            content.failed(failure);
+    }
+
+    @Override
+    public void produceContent()
+    {
+        HttpInput.Content content;
+        synchronized (_contentQueue)
+        {
+            if (_contentFailure != null)
+                content = null;
+            else
+                content = _contentQueue.poll();
+        }
+        if (content != null)
+            onContent(content);
+    }
+
+    @Override
+    public void failContent(Throwable failure)
+    {
+        List<HttpInput.Content> copy;
+        synchronized (_contentQueue)
+        {
+            if (_contentFailure == null)
+                _contentFailure = failure;
+            else if (_contentFailure != failure)
+                _contentFailure.addSuppressed(failure);
+
+            copy = new ArrayList<>(_contentQueue);
+            _contentQueue.clear();
+        }
+        copy.forEach(content -> content.failed(failure));
     }
 
     protected void header(HttpField field)

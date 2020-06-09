@@ -114,4 +114,6 @@ public interface IStream extends Stream, Closeable
      * @see #isClosed()
      */
     boolean isRemotelyClosed();
+
+    void fail(Throwable x);
 }
