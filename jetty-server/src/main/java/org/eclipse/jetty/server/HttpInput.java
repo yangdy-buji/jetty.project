@@ -18,15 +18,6 @@
 
 package org.eclipse.jetty.server;
 
-import java.io.IOException;
-import java.nio.ByteBuffer;
-import java.util.Objects;
-import java.util.concurrent.Semaphore;
-import java.util.concurrent.TimeUnit;
-import java.util.function.Consumer;
-import javax.servlet.ReadListener;
-import javax.servlet.ServletInputStream;
-
 import org.eclipse.jetty.http.BadMessageException;
 import org.eclipse.jetty.http.HttpStatus;
 import org.eclipse.jetty.io.EofException;
@@ -36,6 +27,15 @@ import org.eclipse.jetty.util.Callback;
 import org.eclipse.jetty.util.component.Destroyable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import javax.servlet.ReadListener;
+import javax.servlet.ServletInputStream;
+import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.util.Objects;
+import java.util.concurrent.Semaphore;
+import java.util.concurrent.TimeUnit;
+import java.util.function.Consumer;
 
 /**
  * <p> While this class is-a Runnable, it should never be dispatched in it's own thread. It is a runnable only so that the calling thread can use {@link
@@ -114,16 +114,6 @@ public class HttpInput extends ServletInputStream implements Runnable
     }
 
     /**
-     * Called by channel when asynchronous IO needs to produce more content
-     */
-    public void asyncReadProduce()
-    {
-        if (LOG.isDebugEnabled())
-            LOG.debug("asyncReadProduce {}", _contentProducer);
-        produceContent();
-    }
-
-    /**
      * Adds some content to this input stream.
      *
      * @param content the content to add
@@ -140,6 +130,9 @@ public class HttpInput extends ServletInputStream implements Runnable
                 _firstByteTimeStamp++;
         }
         _contentProducer.addContent(content);
+
+        // TODO GW do not do this here.. instead return true if a wakeup is needed and
+        // let the HttpChannel.handle loop do this producing.
         if (isAsync() && _contentProducer.available() > 0)
             return _channelState.onContentAdded();
         return false;
