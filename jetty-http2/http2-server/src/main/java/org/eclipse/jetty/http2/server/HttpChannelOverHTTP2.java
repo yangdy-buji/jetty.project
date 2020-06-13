@@ -241,12 +241,7 @@ public class HttpChannelOverHTTP2 extends HttpChannel implements Closeable, Writ
     }
 
     @Override
-    public Runnable onData(DataFrame frame, Callback callback)
-    {
-        return onRequestContent(frame, callback);
-    }
-
-    public Runnable onRequestContent(DataFrame frame, final Callback callback)
+    public Runnable onData(DataFrame frame, final Callback callback)
     {
         Stream stream = getStream();
         if (stream.isReset())
@@ -323,7 +318,7 @@ public class HttpChannelOverHTTP2 extends HttpChannel implements Closeable, Writ
         // HttpInputOverHttp2 calls this method via produceRawContent();
         // this is the equivalent of Http1 parseAndFill().
 
-        if (getStream().available() > 0)
+        if (getStream().available())
             getStream().demand(1);
     }
 

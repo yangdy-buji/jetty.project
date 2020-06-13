@@ -180,9 +180,9 @@ public interface Stream
     public void demand(long n);
 
     /**
-     * @return the amount of {@code DATA} frames already available in this stream.
+     * @return TRUE iff {@code DATA} frames are already available in this stream.
      */
-    public int available();
+    public boolean available();
 
     /**
      * <p>A {@link Stream.Listener} is the passive counterpart of a {@link Stream} and receives

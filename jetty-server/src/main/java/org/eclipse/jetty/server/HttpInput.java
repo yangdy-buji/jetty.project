@@ -140,7 +140,7 @@ public class HttpInput extends ServletInputStream implements Runnable
                 _firstByteTimeStamp++;
         }
         _contentProducer.addContent(content);
-        if (isAsync() && _contentProducer.available(this::produceContent) > 0)
+        if (isAsync() && _contentProducer.available() > 0)
             return _channelState.onContentAdded();
         return false;
     }
@@ -231,7 +231,7 @@ public class HttpInput extends ServletInputStream implements Runnable
     public boolean onIdleTimeout(Throwable x)
     {
         boolean neverDispatched = _channelState.isIdle();
-        boolean waitingForContent = _contentProducer.available(this::produceContent) == 0 && !_eof.isEof();
+        boolean waitingForContent = _contentProducer.available() == 0 && !_eof.isEof();
         if ((waitingForContent || neverDispatched) && !isError())
         {
             x.addSuppressed(new Throwable("HttpInput idle timeout"));
@@ -273,7 +273,7 @@ public class HttpInput extends ServletInputStream implements Runnable
     public boolean isReady()
     {
         // calling _contentProducer.available() might change the _eof state, so the following test order matters
-        if (_contentProducer.available(this::produceContent) > 0 || _eof.isEof())
+        if (_contentProducer.available() > 0 || _eof.isEof())
         {
             if (LOG.isDebugEnabled())
                 LOG.debug("isReady? true");
@@ -304,7 +304,7 @@ public class HttpInput extends ServletInputStream implements Runnable
         }
         else
         {
-            if (_contentProducer.available(this::produceContent) > 0)
+            if (_contentProducer.available() > 0)
             {
                 woken = _channelState.onReadReady();
             }
@@ -373,7 +373,7 @@ public class HttpInput extends ServletInputStream implements Runnable
             //    content got consumed.
             if (!isAsync())
                 _semaphore.drainPermits();
-            int read = _contentProducer.read(this::produceContent, b, off, len);
+            int read = _contentProducer.read(b, off, len);
             if (LOG.isDebugEnabled())
                 LOG.debug("read produced {} byte(s)", read);
             if (read > 0)
@@ -431,7 +431,7 @@ public class HttpInput extends ServletInputStream implements Runnable
     @Override
     public int available()
     {
-        int available = _contentProducer.available(this::produceContent);
+        int available = _contentProducer.available();
         if (LOG.isDebugEnabled())
             LOG.debug("available = {}", available);
         return available;
@@ -561,7 +561,7 @@ public class HttpInput extends ServletInputStream implements Runnable
     // while nextNonEmptyContent() is executing, hence all accesses to _rawContent and _transformedContent must be
     // mutually excluded.
     // TODO: maybe the locking could be more fine grained, by only protecting the if (null|!null) blocks?
-    private static class ContentProducer
+    private class ContentProducer
     {
         // Note: _rawContent can never be null for as long as _transformedContent is not null.
         private Content _rawContent;
@@ -674,31 +674,31 @@ public class HttpInput extends ServletInputStream implements Runnable
             }
         }
 
-        int available(Runnable rawContentProducer)
+        int available()
         {
             synchronized (this)
             {
-                Content content = nextNonEmptyContent(rawContentProducer);
+                Content content = nextNonEmptyContent();
                 return content == null ? 0 : content.remaining();
             }
         }
 
-        int read(Runnable rawContentProducer, byte[] b, int off, int len)
+        int read(byte[] b, int off, int len)
         {
             synchronized (this)
             {
                 if (LOG.isDebugEnabled())
                     LOG.debug("{} read", this);
-                Content content = nextNonEmptyContent(rawContentProducer);
+                Content content = nextNonEmptyContent();
                 return content == null ? 0 : content.get(b, off, len);
             }
         }
 
-        private Content nextNonEmptyContent(Runnable rawContentProducer)
+        private Content nextNonEmptyContent()
         {
             if (_rawContent == null)
             {
-                rawContentProducer.run();
+                produceContent();
                 if (_rawContent == null)
                     return null;
             }
@@ -730,7 +730,7 @@ public class HttpInput extends ServletInputStream implements Runnable
                     {
                         _rawContent.succeeded();
                         _rawContent = null;
-                        rawContentProducer.run();
+                        produceContent();
                         if (_rawContent == null)
                             return null;
                     }

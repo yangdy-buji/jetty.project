@@ -456,11 +456,12 @@ public class HTTP2Stream extends IdleTimeout implements IStream, Callback, Dumpa
         }
     }
 
-    public int available()
+    @Override
+    public boolean available()
     {
         try (AutoLock l = lock.lock())
         {
-            return dataQueue.size();
+            return !dataQueue.isEmpty();
         }
     }
 
