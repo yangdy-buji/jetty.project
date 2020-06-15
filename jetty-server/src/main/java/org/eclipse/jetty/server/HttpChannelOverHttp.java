@@ -76,7 +76,7 @@ public class HttpChannelOverHttp extends HttpChannel implements HttpParser.Reque
     }
 
     @Override
-    public void produceContent()
+    public void produceRawContent()
     {
         ((HttpConnection)getEndPoint().getConnection()).parseAndFillForContent();
     }

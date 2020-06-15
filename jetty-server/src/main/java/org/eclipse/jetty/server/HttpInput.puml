@@ -13,6 +13,55 @@ participant Application as "\nApplication\n"
 
 autoactivate on
 
+== HTTP1 Blocking Read ==
+
+[-> HttpChannel: handle
+HttpChannel->Application: dispatch
+Application->HttpInput: read
+loop while nothing read
+    HttpInput->ContentProducer: read
+    ContentProducer->HttpChannel: produceContent
+    HttpChannel->Connection: parseAndFill
+    loop while inContentState && filled>0
+        Connection->Connection: parse
+        Connection->HttpChannel: onContent
+        HttpChannel->HttpInput: addContent
+        HttpInput->ContentProducer: addContent
+        return
+        return
+        return
+        return
+        Connection->EndPoint: fill
+        return
+    end
+    return
+    return
+    return len
+
+    alt there is no content
+        HttpInput->HttpChannel: onBlockWaitForContent
+        HttpChannel->Connection: fillInterest
+        Connection->EndPoint: tryFillInterest
+        return
+        return
+        return
+        HttpInput->Semaphore: acquire
+        ...
+        EndPoint->Connection: onFillable
+        Connection->HttpInput: unblock
+        HttpInput->Semaphore: release
+        return
+        return
+        return
+        return
+    end
+end
+return
+return
+return
+
+...
+newpage
 
 == HTTP1 Async Read ==
 note over HttpChannelState
@@ -159,19 +208,6 @@ loop
                 Application->HttpInput: read
                 HttpInput->ContentProducer: read
                 return
-                alt no content
-                    HttpInput->HttpChannel:onAsyncWaitForContent
-                    note right  #FF8888
-                    "TODO why doesn't this
-                    use REGISTER/REGISTERED?
-                    mechanism?   IOException would be better"
-                    end note
-                    HttpChannel->Connection:asyncReadFillInterested
-                    Connection->EndPoint: fillInterested
-                    return
-                    return
-                    return
-                end
                 return
             end
         end
@@ -184,7 +220,8 @@ return
 ...
 newpage
 
-== HTTP1 Blocking Read ==
+
+== HTTP2 Blocking Read ==
 
 [-> HttpChannel: handle
 HttpChannel->Application: dispatch
@@ -192,29 +229,19 @@ Application->HttpInput: read
 loop while nothing read
     HttpInput->ContentProducer: read
     ContentProducer->HttpChannel: produceContent
-    HttpChannel->Connection: parseAndFill
-    loop while inContentState && filled>0
-        Connection->Connection: parse
-        Connection->HttpChannel: onContent
-        HttpChannel->HttpInput: addContent
-        HttpInput->ContentProducer: addContent
-        return
-        return
-        return
-        return
-        Connection->EndPoint: fill
-        return
-    end
-    return
+note over HttpChannel
+TODO
+end note
     return
     return len
 
     alt there is no content
         HttpInput->HttpChannel: onBlockWaitForContent
-        HttpChannel->Connection: fillInterest
-        Connection->EndPoint: tryFillInterest
-        return
-        return
+
+note over HttpChannel
+TODO
+end note
+
         return
         HttpInput->Semaphore: acquire
         ...
@@ -230,5 +257,118 @@ end
 return
 return
 return
+
+...
+newpage
+
+== HTTP2 Async Read ==
+note over HttpChannelState
+inputState=IDLE
+end note
+Application->HttpInput: setReadListener
+activate Application
+HttpInput->ContentProducer: available
+ContentProducer->HttpChannel: produceContent
+
+note over HttpChannel
+TODO
+end note
+
+return
+return
+alt available()>0 || isError
+    HttpInput->HttpChannelState: onReadReady
+    note over HttpChannelState
+    inputState=READY
+    end note
+    return
+else available==0
+    HttpInput->HttpChannelState: onReadUnready
+    note over HttpChannelState
+    inputState=REGISTERED
+    end note
+    HttpChannelState->HttpChannel: onAsyncWaitForContent
+
+note over HttpChannel
+TODO
+end note
+
+    return
+    return
+    ...
+
+note over HttpChannel
+TODO
+end note
+
+    else available<0
+    HttpInput->HttpChannelState: onReadEof
+    note over HttpChannelState
+    inputState=READY
+    end note
+    return
+end
+return
+deactivate Application
+
+[->HttpChannel: handle
+loop
+    HttpChannel->HttpChannelState: nextAction
+    return
+    alt inputState==REGISTER
+        note over HttpChannelState
+        inputState=REGISTERED
+        end note
+
+note over HttpChannel
+TODO
+end note
+
+    else inputState==POSSIBLE
+        note over HttpChannelState
+        inputState=PRODUCING
+        end note
+        HttpChannel->HttpChannel: produceContent
+
+note over HttpChannel
+TODO
+end note
+        return
+    else inputState==READY
+        note over HttpChannelState
+        inputState=IDLE
+        end note
+        HttpChannel->Application: onReadPossible
+        loop while (isReady())
+            Application->HttpInput: isReady
+            HttpInput->ContentProducer: available
+            ContentProducer->HttpChannel: produceContent
+
+note over HttpChannel
+TODO
+end note
+
+            return
+            return
+            Alt available==0
+                HttpInput->HttpChannelState:onReadUnready
+                note over HttpChannelState
+                inputState=REGISTER
+                end note
+                return
+            end
+            return available>0
+            Alt isReady()==true
+                Application->HttpInput: read
+                HttpInput->ContentProducer: read
+                return
+                return
+            end
+        end
+        return isReady()==false
+    end
+end
+return
+
 
 @enduml

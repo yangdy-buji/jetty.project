@@ -72,7 +72,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-// TODO need  these on HTTP2 as well!
+// See also org.eclipse.jetty.http.client.AsyncIOServletTest
 public class AsyncServletIOTest
 {
     private static final Logger LOG = LoggerFactory.getLogger(AsyncServletIOTest.class);

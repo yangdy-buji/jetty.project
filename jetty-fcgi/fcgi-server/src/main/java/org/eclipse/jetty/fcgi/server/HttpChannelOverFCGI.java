@@ -78,7 +78,7 @@ public class HttpChannelOverFCGI extends HttpChannel
     }
 
     @Override
-    public void produceContent()
+    public void produceRawContent()
     {
         HttpInput.Content content;
         synchronized (_contentQueue)

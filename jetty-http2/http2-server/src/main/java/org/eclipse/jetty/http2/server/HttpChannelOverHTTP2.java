@@ -285,25 +285,16 @@ public class HttpChannelOverHTTP2 extends HttpChannel implements Closeable, Writ
             handle |= handleContent | handleRequest;
         }
 
-        boolean woken = false;
-        if (getState().isAsync())
-        {
-            woken = getState().onReadPossible();
-            handle |= woken;
-        }
-        else
-        {
+        if (!getRequest().getHttpInput().hasReadListener())
             getRequest().getHttpInput().unblock();
-        }
 
         if (LOG.isDebugEnabled())
         {
-            LOG.debug("HTTP2 Request #{}/{}: {} bytes of {} content, woken? {}, handle: {}",
+            LOG.debug("HTTP2 Request #{}/{}: {} bytes of {} content, handle: {}",
                     stream.getId(),
                     Integer.toHexString(stream.getSession().hashCode()),
                     length,
                     endStream ? "last" : "some",
-                    woken,
                     handle);
         }
 
@@ -313,12 +304,10 @@ public class HttpChannelOverHTTP2 extends HttpChannel implements Closeable, Writ
     }
 
     @Override
-    public void produceContent()
+    public void produceRawContent()
     {
-        // HttpInputOverHttp2 calls this method via produceRawContent();
-        // this is the equivalent of Http1 parseAndFill().
-
-        if (getStream().available())
+        // If we are IDLE or PRODUCING, then we can become REGISTERED and demand content here.
+        if (getState().onDemand())
             getStream().demand(1);
     }
 

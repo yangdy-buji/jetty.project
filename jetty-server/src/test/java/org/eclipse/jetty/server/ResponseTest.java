@@ -178,7 +178,7 @@ public class ResponseTest
         })
         {
             @Override
-            public void produceContent()
+            public void produceRawContent()
             {
             }
 

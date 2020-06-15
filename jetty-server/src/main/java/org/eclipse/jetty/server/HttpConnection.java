@@ -712,7 +712,7 @@ public class HttpConnection extends AbstractConnection implements Runnable, Http
         @Override
         public void succeeded()
         {
-            if (_channel.getState().onReadPossible())
+            if (_channel.getState().onProducable())
                 _channel.handle();
         }
 

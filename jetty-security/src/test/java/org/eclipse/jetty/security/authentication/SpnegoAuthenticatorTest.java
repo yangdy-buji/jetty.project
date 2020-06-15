@@ -63,7 +63,7 @@ public class SpnegoAuthenticatorTest
             }
 
             @Override
-            public void produceContent()
+            public void produceRawContent()
             {
             }
 
@@ -108,7 +108,7 @@ public class SpnegoAuthenticatorTest
             }
 
             @Override
-            public void produceContent()
+            public void produceRawContent()
             {
             }
 

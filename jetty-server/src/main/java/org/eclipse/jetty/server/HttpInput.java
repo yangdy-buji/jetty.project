@@ -18,6 +18,15 @@
 
 package org.eclipse.jetty.server;
 
+import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.util.Objects;
+import java.util.concurrent.Semaphore;
+import java.util.concurrent.TimeUnit;
+import java.util.function.Consumer;
+import javax.servlet.ReadListener;
+import javax.servlet.ServletInputStream;
+
 import org.eclipse.jetty.http.BadMessageException;
 import org.eclipse.jetty.http.HttpStatus;
 import org.eclipse.jetty.io.EofException;
@@ -27,15 +36,6 @@ import org.eclipse.jetty.util.Callback;
 import org.eclipse.jetty.util.component.Destroyable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
-import javax.servlet.ReadListener;
-import javax.servlet.ServletInputStream;
-import java.io.IOException;
-import java.nio.ByteBuffer;
-import java.util.Objects;
-import java.util.concurrent.Semaphore;
-import java.util.concurrent.TimeUnit;
-import java.util.function.Consumer;
 
 /**
  * <p> While this class is-a Runnable, it should never be dispatched in it's own thread. It is a runnable only so that the calling thread can use {@link
@@ -119,7 +119,7 @@ public class HttpInput extends ServletInputStream implements Runnable
      * @param content the content to add
      * @return true if content channel woken for read
      */
-    public boolean addContent(Content content)
+    public boolean addRawContent(Content content)
     {
         if (LOG.isDebugEnabled())
             LOG.debug("addContent {} {}", content, _contentProducer);
@@ -129,12 +129,11 @@ public class HttpInput extends ServletInputStream implements Runnable
             if (_firstByteTimeStamp == Long.MIN_VALUE)
                 _firstByteTimeStamp++;
         }
-        _contentProducer.addContent(content);
+        _contentProducer.addRawContent(content);
 
-        // TODO GW do not do this here.. instead return true if a wakeup is needed and
-        // let the HttpChannel.handle loop do this producing.
-        if (isAsync() && _contentProducer.available() > 0)
-            return _channelState.onContentAdded();
+        if (isAsync())
+            // let the HttpChannel.handle loop do this producing.
+            return _channelState.onRawContentAdded();
         return false;
     }
 
@@ -153,7 +152,9 @@ public class HttpInput extends ServletInputStream implements Runnable
         if (LOG.isDebugEnabled())
             LOG.debug("signalling blocked thread to wake up");
         if (!isError() && !_eof.isEof() && _semaphore.availablePermits() > 1)
-            throw new AssertionError("Only one thread should call unblock and only if we are blocked");
+            throw new AssertionError(
+                String.format("Only one thread should call unblock and only if we are blocked. e=%b eof=%b p=%d",
+                    isError(), _eof.isEof(), _semaphore.availablePermits()));
         _semaphore.release();
     }
 
@@ -175,7 +176,7 @@ public class HttpInput extends ServletInputStream implements Runnable
             LOG.debug("received early EOF");
         _eof = Eof.EARLY_EOF;
         if (isAsync())
-            return _channelState.onContentAdded();
+            return _channelState.onRawContentAdded();
         unblock();
         return false;
     }
@@ -191,7 +192,7 @@ public class HttpInput extends ServletInputStream implements Runnable
             LOG.debug("received EOF");
         _eof = Eof.EOF;
         if (isAsync())
-            return _channelState.onContentAdded();
+            return _channelState.onRawContentAdded();
         unblock();
         return false;
     }
@@ -230,7 +231,7 @@ public class HttpInput extends ServletInputStream implements Runnable
             x.addSuppressed(new Throwable("HttpInput idle timeout"));
             _error = x;
             if (isAsync())
-                return _channelState.onContentAdded();
+                return _channelState.onRawContentAdded();
             unblock();
         }
         return false;
@@ -246,7 +247,7 @@ public class HttpInput extends ServletInputStream implements Runnable
             _error = x;
 
         if (isAsync())
-            return _channelState.onContentAdded();
+            return _channelState.onRawContentAdded();
         unblock();
         return false;
     }
@@ -266,7 +267,7 @@ public class HttpInput extends ServletInputStream implements Runnable
     public boolean isReady()
     {
         // calling _contentProducer.available() might change the _eof state, so the following test order matters
-        if (_contentProducer.available() > 0 || _eof.isEof())
+        if (_contentProducer.available() > 0 || _eof.isEof()) // TODO or isError ?
         {
             if (LOG.isDebugEnabled())
                 LOG.debug("isReady? true");
@@ -316,6 +317,11 @@ public class HttpInput extends ServletInputStream implements Runnable
             LOG.debug("setReadListener woken=" + woken);
         if (woken)
             scheduleReadListenerNotification();
+    }
+
+    public boolean hasReadListener()
+    {
+        return _readListener != null;
     }
 
     private void scheduleReadListenerNotification()
@@ -414,7 +420,6 @@ public class HttpInput extends ServletInputStream implements Runnable
                 else
                 {
                     //TODO returning 0 breaks the InputStream contract. Shouldn't IOException be thrown instead?
-                    _channelState.getHttpChannel().onAsyncWaitForContent(); // switches on fill interested
                     return 0;
                 }
             }
@@ -499,13 +504,6 @@ public class HttpInput extends ServletInputStream implements Runnable
                 _readListener.onError(x);
             }
         }
-    }
-
-    private void produceContent()
-    {
-        if (LOG.isDebugEnabled())
-            LOG.debug("produceContent {}", _contentProducer);
-        _channelState.getHttpChannel().produceContent();
     }
 
     private void failContent(Throwable failure)
@@ -617,7 +615,7 @@ public class HttpInput extends ServletInputStream implements Runnable
             }
         }
 
-        void addContent(Content content)
+        void addRawContent(Content content)
         {
             synchronized (this)
             {
@@ -691,7 +689,7 @@ public class HttpInput extends ServletInputStream implements Runnable
         {
             if (_rawContent == null)
             {
-                produceContent();
+                _channelState.getHttpChannel().produceRawContent();
                 if (_rawContent == null)
                     return null;
             }
@@ -723,7 +721,9 @@ public class HttpInput extends ServletInputStream implements Runnable
                     {
                         _rawContent.succeeded();
                         _rawContent = null;
-                        produceContent();
+                        if (LOG.isDebugEnabled())
+                            LOG.debug("produceContent {}", _contentProducer);
+                        _channelState.getHttpChannel().produceRawContent();
                         if (_rawContent == null)
                             return null;
                     }

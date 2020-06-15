@@ -18,7 +18,29 @@
 
 package org.eclipse.jetty.server;
 
-import org.eclipse.jetty.http.*;
+import java.io.IOException;
+import java.net.InetSocketAddress;
+import java.nio.ByteBuffer;
+import java.util.ArrayList;
+import java.util.EventListener;
+import java.util.List;
+import java.util.concurrent.Executor;
+import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.BiConsumer;
+import java.util.function.Consumer;
+import java.util.function.Function;
+import javax.servlet.DispatcherType;
+import javax.servlet.RequestDispatcher;
+import javax.servlet.ServletException;
+
+import org.eclipse.jetty.http.BadMessageException;
+import org.eclipse.jetty.http.HttpFields;
+import org.eclipse.jetty.http.HttpGenerator;
+import org.eclipse.jetty.http.HttpHeader;
+import org.eclipse.jetty.http.HttpStatus;
+import org.eclipse.jetty.http.HttpVersion;
+import org.eclipse.jetty.http.MetaData;
 import org.eclipse.jetty.io.ByteBufferPool;
 import org.eclipse.jetty.io.Connection;
 import org.eclipse.jetty.io.EndPoint;
@@ -32,22 +54,6 @@ import org.eclipse.jetty.util.SharedBlockingCallback.Blocker;
 import org.eclipse.jetty.util.thread.Scheduler;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
-import javax.servlet.DispatcherType;
-import javax.servlet.RequestDispatcher;
-import javax.servlet.ServletException;
-import java.io.IOException;
-import java.net.InetSocketAddress;
-import java.nio.ByteBuffer;
-import java.util.ArrayList;
-import java.util.EventListener;
-import java.util.List;
-import java.util.concurrent.Executor;
-import java.util.concurrent.TimeoutException;
-import java.util.concurrent.atomic.AtomicLong;
-import java.util.function.BiConsumer;
-import java.util.function.Consumer;
-import java.util.function.Function;
 
 /**
  * HttpChannel represents a single endpoint for HTTP semantic processing.
@@ -118,7 +124,7 @@ public abstract class HttpChannel implements Runnable, HttpOutput.Interceptor
         return new HttpInput(state);
     }
 
-    public abstract void produceContent();
+    public abstract void produceRawContent();
 
     public abstract void failContent(Throwable failure);
 
@@ -451,17 +457,23 @@ public abstract class HttpChannel implements Runnable, HttpOutput.Interceptor
 
                     case READ_PRODUCE:
                     {
-                        produceContent();
+                        produceRawContent();
                         break;
                     }
 
                     case READ_CALLBACK:
                     {
                         ContextHandler handler = _state.getContextHandler();
-                        if (handler != null)
-                            handler.handle(_request, _request.getHttpInput());
-                        else
-                            _request.getHttpInput().run();
+                        HttpInput httpInput = _request.getHttpInput();
+                        // We call isReady here so that if rawContent is consumed without
+                        // producing real content, then another callback is scheduled.
+                        if (httpInput.isError() || httpInput.isReady())
+                        {
+                            if (handler != null)
+                                handler.handle(_request, httpInput);
+                            else
+                                httpInput.run();
+                        }
                         break;
                     }
 
@@ -704,7 +716,7 @@ public abstract class HttpChannel implements Runnable, HttpOutput.Interceptor
         if (LOG.isDebugEnabled())
             LOG.debug("onContent {} {}", this, content);
         _combinedListener.onRequestContent(_request, content.getByteBuffer());
-        return _request.getHttpInput().addContent(content);
+        return _request.getHttpInput().addRawContent(content);
     }
 
     public boolean onContentComplete()

@@ -107,11 +107,11 @@ public class HttpChannelState
     private enum InputState
     {
         IDLE,        // No isReady; No data
-        REGISTER,    // isReady()==false handling; No data
-        REGISTERED,  // isReady()==false !handling; No data
-        POSSIBLE,    // isReady()==false async read callback called
+        REGISTER,    // isReady()==false handling; No data; a raw content callback needs to be scheduled
+        REGISTERED,  // isReady()==false !handling; No data; a raw content callback has been scheduled
+        PRODUCABLE,  // isReady()==false H1 async read callback called
         PRODUCING,   // isReady()==false READ_PRODUCE action is being handled
-        READY        // isReady() was false, onContentAdded has been called
+        RAW_CONTENT  // isReady() was false, onRawContentAdded has been called
     }
 
     /*
@@ -458,10 +458,10 @@ public class HttpChannelState
             case ASYNC:
                 switch (_inputState)
                 {
-                    case POSSIBLE:
+                    case PRODUCABLE:
                         _inputState = InputState.PRODUCING;
                         return Action.READ_PRODUCE;
-                    case READY:
+                    case RAW_CONTENT:
                         _inputState = InputState.IDLE;
                         return Action.READ_CALLBACK;
                     case REGISTER:
@@ -1248,7 +1248,7 @@ public class HttpChannelState
             switch (_inputState)
             {
                 case IDLE:
-                case READY:
+                case RAW_CONTENT:
                     if (_state == State.WAITING)
                     {
                         interested = true;
@@ -1262,7 +1262,7 @@ public class HttpChannelState
 
                 case REGISTER:
                 case REGISTERED:
-                case POSSIBLE:
+                case PRODUCABLE:
                 case PRODUCING:
                     break;
 
@@ -1276,14 +1276,38 @@ public class HttpChannelState
     }
 
     /**
-     * Called to signal that content is now available to read.
+     * Called to signal that H2 Channel wishes to demand content.
+     * If IDLE or PRODUCING, we change to REGISTERED and allow the demand.
+     * @return True IFF demand can be called.
+     */
+    public boolean onDemand()
+    {
+        synchronized (this)
+        {
+            if (LOG.isDebugEnabled())
+                LOG.debug("onDemand {}", toStringLocked());
+
+            switch (_inputState)
+            {
+                case IDLE:
+                case PRODUCING:
+                    _inputState = InputState.REGISTERED;
+                    return true;
+                default:
+                    return false;
+            }
+        }
+    }
+
+    /**
+     * Called to signal that raw content is now available to process.
      * If the channel is in ASYNC_WAIT state and unready (ie isReady() has
      * returned false), then the state is changed to ASYNC_WOKEN and true
      * is returned.
      *
      * @return True IFF the channel was unready and in ASYNC_WAIT state
      */
-    public boolean onContentAdded()
+    public boolean onRawContentAdded()
     {
         boolean woken = false;
         synchronized (this)
@@ -1294,16 +1318,16 @@ public class HttpChannelState
             switch (_inputState)
             {
                 case IDLE:
-                case READY:
+                case RAW_CONTENT:
                     break;
 
                 case PRODUCING:
-                    _inputState = InputState.READY;
+                    _inputState = InputState.RAW_CONTENT;
                     break;
 
                 case REGISTER:
                 case REGISTERED:
-                    _inputState = InputState.READY;
+                    _inputState = InputState.RAW_CONTENT;
                     if (_state == State.WAITING)
                     {
                         woken = true;
@@ -1321,7 +1345,7 @@ public class HttpChannelState
     /**
      * Called to signal that the channel is ready for a callback.
      * This is similar to calling {@link #onReadUnready()} followed by
-     * {@link #onContentAdded()}, except that as content is already
+     * {@link #onRawContentAdded()}, except that as content is already
      * available, read interest is never set.
      *
      * @return true if woken
@@ -1337,7 +1361,7 @@ public class HttpChannelState
             switch (_inputState)
             {
                 case IDLE:
-                    _inputState = InputState.READY;
+                    _inputState = InputState.RAW_CONTENT;
                     if (_state == State.WAITING)
                     {
                         woken = true;
@@ -1353,13 +1377,14 @@ public class HttpChannelState
     }
 
     /**
-     * Called to indicate that more content may be available,
-     * but that a handling thread may need to produce (fill/parse)
-     * it.  Typically called by the async read success callback.
+     * Called to indicate that more raw content may be available,
+     * but that calling {@link HttpChannel#produceRawContent()} may
+     * result in a call to {@link HttpInput#addRawContent(HttpInput.Content)}.
+     * Typically called by the async read success callback.
      *
-     * @return {@code true} if more content may be available
+     * @return {@code true} if {@link HttpChannel#handle()} should be called.
      */
-    public boolean onReadPossible()
+    public boolean onProducable()
     {
         boolean woken = false;
         synchronized (this)
@@ -1370,7 +1395,7 @@ public class HttpChannelState
             switch (_inputState)
             {
                 case REGISTERED:
-                    _inputState = InputState.POSSIBLE;
+                    _inputState = InputState.PRODUCABLE;
                     if (_state == State.WAITING)
                     {
                         woken = true;
@@ -1379,7 +1404,7 @@ public class HttpChannelState
                     break;
 
                 case IDLE:
-                case READY:
+                case RAW_CONTENT:
                 case REGISTER:
                     break;
 
@@ -1405,7 +1430,7 @@ public class HttpChannelState
                 LOG.debug("onEof {}", toStringLocked());
 
             // Force read ready so onAllDataRead can be called
-            _inputState = InputState.READY;
+            _inputState = InputState.RAW_CONTENT;
             if (_state == State.WAITING)
             {
                 woken = true;
