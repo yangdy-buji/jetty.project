@@ -281,7 +281,7 @@ public class HttpInput extends ServletInputStream implements Runnable
     public boolean isReady()
     {
         // calling _contentProducer.available() might change the _eof state, so the following test order matters
-        if (_contentProducer.available() > 0 || _eof.isEof()) // TODO or isError ?
+        if (_contentProducer.available() > 0 || _eof.isEof())
         {
             if (LOG.isDebugEnabled())
                 LOG.debug("isReady? true");
