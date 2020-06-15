@@ -1677,7 +1677,7 @@ public class AsyncIOServletTest extends AbstractTest<AsyncIOServletTest.AsyncTra
             {
                 AsyncContext asyncContext = request.startAsync();
                 asyncContext.setTimeout(0);
-                request.getInputStream().setReadListener(new Listener(asyncContext));
+                request.getInputStream().setReadListener(new WriteListenerExecFromReadListener(asyncContext));
             }
         });
 
@@ -1721,7 +1721,7 @@ public class AsyncIOServletTest extends AbstractTest<AsyncIOServletTest.AsyncTra
         assertTrue(failures.isEmpty());
     }
 
-    private static class Listener implements ReadListener, WriteListener
+    private static class WriteListenerExecFromReadListener implements ReadListener, WriteListener
     {
         private final Executor executor = Executors.newFixedThreadPool(32);
         private final CompletableFuture<?> inputComplete = new CompletableFuture<>();
@@ -1732,7 +1732,7 @@ public class AsyncIOServletTest extends AbstractTest<AsyncIOServletTest.AsyncTra
         private final ServletInputStream input;
         private final ServletOutputStream output;
 
-        public Listener(AsyncContext asyncContext) throws IOException
+        public WriteListenerExecFromReadListener(AsyncContext asyncContext) throws IOException
         {
             this.asyncContext = asyncContext;
             this.response = (HttpServletResponse)asyncContext.getResponse();

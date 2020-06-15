@@ -285,22 +285,26 @@ public class HttpChannelOverHTTP2 extends HttpChannel implements Closeable, Writ
             handle |= handleContent | handleRequest;
         }
 
+        // TODO YUUUUUUUUUUUUUUUUUUUUUUUUUUCK!
+        boolean unblocked = false;
         if (!getRequest().getHttpInput().hasReadListener())
-            getRequest().getHttpInput().unblock();
+            unblocked = getRequest().getHttpInput().tryUnblock();
 
         if (LOG.isDebugEnabled())
         {
-            LOG.debug("HTTP2 Request #{}/{}: {} bytes of {} content, handle: {}",
+            LOG.debug("HTTP2 Request #{}/{}: {} bytes of {} content, handle={}, unblocked={}",
                     stream.getId(),
                     Integer.toHexString(stream.getSession().hashCode()),
                     length,
                     endStream ? "last" : "some",
-                    handle);
+                    handle,
+                    unblocked);
         }
 
         boolean wasDelayed = _delayedUntilContent;
         _delayedUntilContent = false;
-        return handle || wasDelayed ? this : null;
+        // TODO ??? return (!unblocked && (handle || wasDelayed)) ? this : null;
+        return (handle || wasDelayed) ? this : null;
     }
 
     @Override

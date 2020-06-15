@@ -1361,6 +1361,7 @@ public class HttpChannelState
             switch (_inputState)
             {
                 case IDLE:
+                case RAW_CONTENT:
                     _inputState = InputState.RAW_CONTENT;
                     if (_state == State.WAITING)
                     {

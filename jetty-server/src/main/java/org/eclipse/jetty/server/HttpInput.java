@@ -158,6 +158,20 @@ public class HttpInput extends ServletInputStream implements Runnable
         _semaphore.release();
     }
 
+    // try to unblock... but only if somebody is blocking
+    public boolean tryUnblock()
+    {
+        // TODO YUUUUUUUUUUUUUUUUUUUUUUUUUUUUUCK!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!1
+        if (LOG.isDebugEnabled())
+            LOG.debug("try signalling blocked thread to wake up");
+        if (_semaphore.availablePermits() == 0)
+        {
+            _semaphore.release();
+            return true;
+        }
+        return false;
+    }
+
     public long getContentLength()
     {
         return _contentProducer.getRawContentArrived();
