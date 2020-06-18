@@ -1,51 +1,29 @@
 @startuml
 
 
-IDLE:No isReady;
-IDLE:No data
-
-REGISTER:isReady()==false
-REGISTER:handling
-REGISTER:No data
-
-REGISTERED:isReady()==false
-REGISTERED:!handling
-REGISTERED: No data
-
-POSSIBLE:isReady()==false
-POSSIBLE: async read callback called
-
-PRODUCING:isReady()==false
-PRODUCING:handling
-PRODUCING:READ_PRODUCE action
-
-READY:isReady() was false
-READY:Data
+IDLE:
+PRODUCING:
+BLOCKING:
+UNREADY:
+READY:
 
 
 [*] --> IDLE
 
-IDLE --> REGISTER : onReadUnready; !WAITING
-IDLE -> REGISTERED : onReadUnready; WAITING
+IDLE --> PRODUCING : produce
 
-REGISTER --> REGISTERED : nextAction->READ_REGISTER
+PRODUCING --> READY : onContent
+BLOCKING --> READY : onContent
+UNREADY --> READY : onContent
+IDLE --> READY : onContent
 
-REGISTERED --> POSSIBLE : onReadPossible; woken=WAITING
-
-POSSIBLE --> PRODUCING : nextAction->READ_PRODUCE
-
-PRODUCING --> READY : onContentAdded
-
-READY -left-> IDLE : nextAction->READ_CALLBACK
-PRODUCING -left-> REGISTERED : nextAction->READ_REGISTER
-
-READY -left-> REGISTERED : onReadUnready; WAITING
-READY -left-> REGISTER : onReadUnready; !WAITING
-
-REGISTER -right-> READY : onContentAdded; woken==WAITING
-REGISTERED -right-> READY : onContentAdded; woken==WAITING
-
-IDLE -right-> READY : onReadReady; woken==WAITING
+BLOCKING -up-> IDLE : onWakeup
+UNREADY -left-> IDLE : onWakeup
 
 
+PRODUCING -left-> IDLE : POLL
+PRODUCING --> BLOCKING : BLOCK
+PRODUCING -left-> UNREADY : ASYNC
+
+READY -up-> IDLE : return content
 @enduml
