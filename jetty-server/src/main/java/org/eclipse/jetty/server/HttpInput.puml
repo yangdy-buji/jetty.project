@@ -173,37 +173,9 @@ HttpInput->ContentProducer: nextNon\nNullContent\n(POLL)
                     IDLE->PRODUCING
                     end note
                     HttpChannelState->HttpChannel: produceContent
-                        alt implementation
-                        else HTTP1
-                            HttpChannel->Connection: fillAndParse
-                                alt Content available
-                                    Connection->HttpChannel: addContent
-                                        HttpChannel->HttpChannelState: onContent
-                                            note over HttpChannelState
-                                            PRODUCING->READY
-                                            remember content
-                                            end note
-                                        return
-                                    return
-                                end
-                            return
-                            ...
-                        else HTTP2
-                            alt if not already demanding
-                                HttpChannel->Connection: demand(1)
-                                    alt Content available or any time after
-                                        Connection->HttpChannel: onData
-                                            HttpChannel->HttpChannelState: onContent
-                                                note over HttpChannelState
-                                                PRODUCING->READY
-                                                remember content
-                                                end note
-                                            return
-                                        return
-                                    end
-                                return
-                            end
-                        end
+                        note over HttpChannel
+                            as produce content above
+                        end note
                     return
                     ...
                 else PRODUCING
@@ -283,37 +255,9 @@ HttpInput->ContentProducer: nextNon\nNullContent\n(ASYNC)
                     IDLE->PRODUCING
                     end note
                     HttpChannelState->HttpChannel: produceContent
-                        alt implementation
-                        else HTTP1
-                            HttpChannel->Connection: fillAndParse
-                                alt Content available
-                                    Connection->HttpChannel: addContent
-                                        HttpChannel->HttpChannelState: onContent
-                                            note over HttpChannelState
-                                            PRODUCING->READY
-                                            remember content
-                                            end note
-                                        return
-                                    return
-                                end
-                            return
-                            ...
-                        else HTTP2
-                            alt if not already demanding
-                                HttpChannel->Connection: demand(1)
-                                    alt Content available or any time after
-                                        Connection->HttpChannel: onData
-                                            HttpChannel->HttpChannelState: onContent
-                                                note over HttpChannelState
-                                                PRODUCING->READY
-                                                remember content
-                                                end note
-                                            return
-                                        return
-                                    end
-                                return
-                            end
-                        end
+                        note over HttpChannel
+                            as produceContent above
+                        end note
                     return
                     ...
                 else PRODUCING
@@ -322,26 +266,9 @@ HttpInput->ContentProducer: nextNon\nNullContent\n(ASYNC)
                     end note
 
                     HttpChannelState->HttpChannel: needContent
-                        alt implementation
-                        else HTTP1
-                            HttpChannel->Connection: fillInterest
-                                note over HttpChannel
-                                    onFillable below could happen in this scope
-                                    or any time from now
-                                end note
-                            return
-                            ...
-                        else HTTP2
-                            alt if not already demanding
-                                HttpChannel->Connection: demand(1)
-                                    note over HttpChannel
-                                        onData below could already have
-                                        been called, could happen in this scope
-                                        or any time from now
-                                    end note
-                                return
-                            end
-                        end
+                        note over HttpChannel
+                            as needContent above
+                        end note
                     return
                     ...
                 else READY
@@ -379,15 +306,34 @@ alt if content arrives
         be IDLE or even PRODUCING in some circumstances
         Those other states will be handled as per
         examples above.
+        The full state handling is shown below, even for
+        blocking cases
     end note
     alt implementation
     else HTTP1
         Connection->HttpChannel: onFillable
         activate Connection
             HttpChannel->HttpChannelState: onWakeup
-                note over HttpChannelState
-                UNREADY->IDLE
-                end note
+                alt inputState
+                else BLOCKING
+                    note over HttpChannelState
+                    BLOCKING->IDLE
+                    woken=false
+                    end note
+                    HttpChannelState->Semaphore:release
+                    return
+                    ...
+                else UNREADY
+                    note over HttpChannelState
+                    UNREADY->IDLE
+                    woken=WAITING
+                    end note
+                    ...
+                else default
+                    note over HttpChannelState
+                    IllegalStateException
+                    end note
+                end
             return woken
         return woken
         deactivate Connection
@@ -396,11 +342,35 @@ alt if content arrives
         Connection->HttpChannel: onData
         activate Connection
             HttpChannel->HttpChannelState: onContent
+                alt inputState
+                else BLOCKING
+                    note over HttpChannelState
+                    BLOCKING->READY
+                    remember content
+                    woken=false
+                    end note
+                    HttpChannelState->Semaphore:release
+                    return
+                    ...
+                else UNREADY
                     note over HttpChannelState
                     UNREADY->READY
                     remember content
+                    woken=WAITING
                     end note
-                return woken
+                    ...
+                else READY
+                    note over HttpChannelState
+                    IllegalStateException
+                    end note
+                else default
+                    note over HttpChannelState
+                    ->READY
+                    remember content
+                    woken=false
+                    end note
+                end
+            return woken
         return woken
         deactivate Connection
     end
