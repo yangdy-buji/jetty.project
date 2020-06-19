@@ -19,6 +19,7 @@
 package org.eclipse.jetty.server;
 
 import java.io.IOException;
+import java.io.InterruptedIOException;
 import java.nio.ByteBuffer;
 import java.util.Objects;
 import java.util.concurrent.TimeUnit;
@@ -49,7 +50,6 @@ public class HttpInput extends ServletInputStream implements Runnable
     private final HttpChannelState _channelState;
     private final ContentProducer _contentProducer = new ContentProducer();
 
-    private Eof _eof = Eof.NOT_YET;
     private Throwable _error;
     private ReadListener _readListener;
     private long _firstByteTimeStamp = Long.MIN_VALUE;
@@ -66,7 +66,6 @@ public class HttpInput extends ServletInputStream implements Runnable
         if (LOG.isDebugEnabled())
             LOG.debug("recycle");
         _contentProducer.recycle();
-        _eof = Eof.NOT_YET;
         _error = null;
         _readListener = null;
         _firstByteTimeStamp = Long.MIN_VALUE;
@@ -119,14 +118,9 @@ public class HttpInput extends ServletInputStream implements Runnable
      */
     public boolean earlyEOF()
     {
-        // TODO investigate why this is only called for HTTP1? What about H2 resets?
         if (LOG.isDebugEnabled())
             LOG.debug("received early EOF");
-        _eof = Eof.EARLY_EOF;
-        if (isAsync())
-            return _channelState.onRawContentAdded();
-        unblock();
-        return false;
+        return _channelState.onEof(true);
     }
 
     /**
@@ -136,15 +130,9 @@ public class HttpInput extends ServletInputStream implements Runnable
      */
     public boolean eof()
     {
-        // TODO why not have isLast on HttpInput.Content and let it flow through
-        // interceptors normally, and content can then change HttpChannelState.inputState
         if (LOG.isDebugEnabled())
             LOG.debug("received EOF");
-        _eof = Eof.EOF;
-        if (isAsync())
-            return _channelState.onRawContentAdded();
-        unblock();
-        return false;
+        return _channelState.onEof(false);
     }
 
     public boolean consumeAll()
@@ -216,12 +204,19 @@ public class HttpInput extends ServletInputStream implements Runnable
     @Override
     public boolean isReady()
     {
-        if (_eof.isEof())
+        try
+        {
+            Content content = _contentProducer.nextNonEmptyContent(HttpChannelState.Mode.ASYNC);
+            if (LOG.isDebugEnabled())
+                LOG.debug("isReady? {}", content);
+            return content != null;
+        }
+        catch (IOException e)
+        {
+            if (LOG.isDebugEnabled())
+                LOG.debug("isReady", e);
             return true;
-        Content content = _contentProducer.nextNonEmptyContent(HttpChannelState.Mode.ASYNC);
-        if (LOG.isDebugEnabled())
-            LOG.debug("isReady? {}", content);
-        return content != null;
+        }
     }
 
     @Override
@@ -299,27 +294,11 @@ public class HttpInput extends ServletInputStream implements Runnable
         if (LOG.isDebugEnabled())
             LOG.debug("read content {}", content);
         if (content != null)
-            return content.get(b, off, len);
-
-        if (LOG.isDebugEnabled())
-            LOG.debug("read error = " + _error);
-        if (_error != null)
-            throw new IOException(_error);
-
-        if (LOG.isDebugEnabled())
-            LOG.debug("read EOF = {}", _eof);
-        if (_eof.isEarly())
-            throw new EofException("Early EOF");
-
-        if (_eof.isEof())
         {
-            _eof = Eof.CONSUMED_EOF;
-            boolean wasInAsyncWait = isAsync() && _channelState.onReadEof();
-            if (LOG.isDebugEnabled())
-                LOG.debug("read on EOF. async={} wasWait={}", async, wasInAsyncWait);
-            if (wasInAsyncWait)
-                scheduleReadListenerNotification();
-            return -1;
+            len = content.get(b, off, len);
+            if (len < 0)
+                _channelState.onReadEof();
+            return len;
         }
 
         // TODO better handling here???
@@ -331,10 +310,18 @@ public class HttpInput extends ServletInputStream implements Runnable
     @Override
     public int available()
     {
-        Content content = _contentProducer.nextNonEmptyContent(HttpChannelState.Mode.POLL);
-        if (LOG.isDebugEnabled())
-            LOG.debug("available = {}", content);
-        return content == null ? 0 : content.remaining();
+        try
+        {
+            Content content = _contentProducer.nextNonEmptyContent(HttpChannelState.Mode.POLL);
+            if (LOG.isDebugEnabled())
+                LOG.debug("available = {}", content);
+            return content == null ? 0 : content.remaining();
+        }
+        catch(IOException e)
+        {
+            LOG.debug("!available", e);
+            return 0;
+        }
     }
 
     /* Runnable */
@@ -500,27 +487,6 @@ public class HttpInput extends ServletInputStream implements Runnable
             }
         }
 
-        void addRawContent(Content content)
-        {
-            synchronized (this)
-            {
-                if (LOG.isDebugEnabled())
-                    LOG.debug("{} addContent {}", this, content);
-                if (content == null)
-                    throw new AssertionError("Cannot add null content");
-                if (_consumeFailure != null)
-                {
-                    content.failed(_consumeFailure);
-                    return;
-                }
-                if (_rawContent != null)
-                    throw new AssertionError("Cannot add new content while current one hasn't been processed");
-
-                _rawContent = content;
-                _rawContentArrived += content.remaining();
-            }
-        }
-
         void consumeTransformedContent(Consumer<Throwable> failRawContent, Throwable failure)
         {
             synchronized (this)
@@ -550,7 +516,7 @@ public class HttpInput extends ServletInputStream implements Runnable
             }
         }
 
-        private Content nextNonEmptyContent(HttpChannelState.Mode mode)
+        private Content nextNonEmptyContent(HttpChannelState.Mode mode) throws IOException
         {
             while (true)
             {
@@ -562,12 +528,18 @@ public class HttpInput extends ServletInputStream implements Runnable
 
                     if (_transformedContent.isEof())
                     {
+                        // The last content is succeeded once it is consumed.
+                        // We null the raw content to indicate that succeeded has been called,
+                        // but keep the transformed content so that EOF can be returned multiple
+                        // times.
                         if (_rawContent != null)
                         {
                             if (_transformedContent != _rawContent)
                                 _transformedContent.succeeded();
                             _rawContent.succeeded();
                             _rawContent = null;
+                            // TODO maybe we should insted do below to remember succeeded has been called?
+                            // if ( _rawContent!= EOF_CONTENT) _rawContent = _transformedContent = EOF_CONTENT
                         }
                         return _transformedContent;
                     }
@@ -589,7 +561,20 @@ public class HttpInput extends ServletInputStream implements Runnable
                     _rawContent.succeeded();
                 }
 
-                _rawContent = _channelState.nextContent(mode);
+                try
+                {
+                    _rawContent = _channelState.nextContent(mode);
+                }
+                catch (InterruptedException e)
+                {
+                    // TODO what to do here?
+                    throw new InterruptedIOException()
+                    {
+                        {
+                            initCause(e);
+                        }
+                    };
+                }
             }
         }
 
@@ -672,11 +657,6 @@ public class HttpInput extends ServletInputStream implements Runnable
             return false;
         }
 
-        public boolean isEarlyEof()
-        {
-            return false;
-        }
-
         public ByteBuffer getByteBuffer()
         {
             return _content;
@@ -688,7 +668,7 @@ public class HttpInput extends ServletInputStream implements Runnable
             return InvocationType.NON_BLOCKING;
         }
 
-        public int get(byte[] buffer, int offset, int length)
+        public int get(byte[] buffer, int offset, int length) throws IOException
         {
             length = Math.min(_content.remaining(), length);
             _content.get(buffer, offset, length);
@@ -724,4 +704,52 @@ public class HttpInput extends ServletInputStream implements Runnable
         }
     }
 
+    public static class EofContent extends Content
+    {
+        final Content _delegate;
+        final boolean _early;
+
+        public EofContent(Content content)
+        {
+            this(content, false);
+        }
+
+        public EofContent(Content content, boolean early)
+        {
+            super(content._content);
+            _delegate = content;
+            _early = early;
+        }
+
+        @Override
+        public boolean isEof()
+        {
+            return true;
+        }
+
+        @Override
+        public void succeeded()
+        {
+            _delegate.succeeded();
+        }
+
+        @Override
+        public void failed(Throwable x)
+        {
+            _delegate.failed(x);
+        }
+
+        @Override
+        public int get(byte[] buffer, int offset, int length) throws IOException
+        {
+            int len = super.get(buffer, offset, length);
+            if (len == 0)
+            {
+                if (_early)
+                    throw new IOException("EARLY EOF");
+                return -1;
+            }
+            return len;
+        }
+    }
 }

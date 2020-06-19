@@ -33,6 +33,7 @@ import org.eclipse.jetty.io.QuietException;
 import org.eclipse.jetty.server.handler.ContextHandler;
 import org.eclipse.jetty.server.handler.ContextHandler.Context;
 import org.eclipse.jetty.server.handler.ErrorHandler;
+import org.eclipse.jetty.util.BufferUtil;
 import org.eclipse.jetty.util.thread.Scheduler;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -112,8 +113,24 @@ public class HttpChannelState
         BLOCKING,
         UNREADY,
         WOKEN,
-        READY
+        READY,
+        EOF,
+        EOF_EARLY,
+        EOF_CONSUMED
     }
+
+    /*
+     * Input content mode
+     */
+    public enum Mode
+    {
+        BLOCK, // Block for content
+        POLL,  // Poll for content, returning null if none
+        ASYNC  // Async content, scheduling callback if none
+    } ;
+
+    static HttpInput.EofContent EOF = new HttpInput.EofContent(new HttpInput.Content(BufferUtil.EMPTY_BUFFER));
+    static HttpInput.EofContent EOF_EARLY = new HttpInput.EofContent(new HttpInput.Content(BufferUtil.EMPTY_BUFFER));
 
     /*
      * The output committed state, which works together with {@link HttpOutput.State}
@@ -149,6 +166,9 @@ public class HttpChannelState
     private RequestState _requestState = RequestState.BLOCKING;
     private OutputState _outputState = OutputState.OPEN;
     private InputState _inputState = InputState.IDLE;
+    private Semaphore _semaphore = new Semaphore(0);
+    private HttpInput.Content _content;
+
     private boolean _initial = true;
     private boolean _sendError;
     private boolean _asyncWritePossible;
@@ -205,62 +225,6 @@ public class HttpChannelState
         }
     }
 
-    public enum Mode { BLOCK, POLL, ASYNC } ;
-    Semaphore _semaphore = new Semaphore(0);
-    HttpInput.Content _content;
-    HttpInput.Content nextContent(Mode mode)
-    {
-        while (true)
-        {
-            boolean need = false;
-            boolean acquire = false;
-
-            synchronized (this)
-            {
-                switch (_inputState)
-                {
-                    case IDLE:
-                        _inputState = InputState.PRODUCING;
-                        break;
-
-                    case PRODUCING:
-                        switch (mode)
-                        {
-                            case BLOCK:
-                                _inputState = InputState.BLOCKING;
-                                need = true;
-                                acquire = true;
-                                break;
-                            case POLL:
-                                _inputState = InputState.IDLE;
-                                return null;
-                            case ASYNC:
-                                need = true;
-                                break;
-                        }
-                        break;
-
-                    case UNREADY:
-                        return null;
-
-                    case READY:
-                        _inputState = InputState.IDLE;
-                        HttpInput.Content content = _content;
-                        _content = null;
-                        return content;
-
-                    default:
-                        throw new IllegalStateException();
-                }
-
-                if (need)
-                    _channel.needContent(!acquire);
-                if (acquire)
-                    _semaphore.acquire();
-            }
-        }
-    }
-
     public boolean onWakeup()
     {
         boolean woken = false;
@@ -290,6 +254,51 @@ public class HttpChannelState
         if (release)
             _semaphore.release();
         return woken;
+    }
+
+    public boolean onEof(boolean early)
+    {
+        boolean woken = false;
+        boolean release = false;
+        synchronized (this)
+        {
+            switch (_inputState)
+            {
+                case BLOCKING:
+                    _inputState = InputState.READY;
+                    _content = early?EOF_EARLY:EOF;
+                    release = true;
+                    break;
+
+                case UNREADY:
+                    _inputState = InputState.READY;
+                    _content = early?EOF_EARLY:EOF;
+                    if (_state == State.WAITING)
+                    {
+                        _state = State.WOKEN;
+                        woken = true;
+                    }
+                    break;
+
+                case IDLE:
+                case PRODUCING:
+                    _inputState = InputState.READY;
+                    _content = early?EOF_EARLY:EOF;
+                    break;
+
+                case READY:
+                    _content = new HttpInput.EofContent(_content);
+                    break;
+
+                default:
+                    throw new IllegalStateException();
+            }
+        }
+
+        if (release)
+            _semaphore.release();
+        return woken;
+
     }
 
     public boolean onContent(HttpInput.Content content)
@@ -330,7 +339,71 @@ public class HttpChannelState
         return woken;
     }
 
+    HttpInput.Content nextContent(Mode mode) throws InterruptedException
+    {
+        while (true)
+        {
+            boolean need = false;
+            boolean acquire = false;
 
+            synchronized (this)
+            {
+                switch (_inputState)
+                {
+                    case EOF:
+                    case EOF_EARLY:
+                    case EOF_CONSUMED:
+                        return _content;
+
+                    case IDLE:
+                        _inputState = InputState.PRODUCING;
+                        break;
+
+                    case PRODUCING:
+                        switch (mode)
+                        {
+                            case BLOCK:
+                                _inputState = InputState.BLOCKING;
+                                need = true;
+                                acquire = true;
+                                break;
+                            case POLL:
+                                _inputState = InputState.IDLE;
+                                return null;
+                            case ASYNC:
+                                need = true;
+                                break;
+                        }
+                        break;
+
+                    case UNREADY:
+                        return null;
+
+                    case READY:
+                        HttpInput.Content content = _content;
+                        if (_content.isEof())
+                        {
+                            _content = EOF;
+                            _inputState = InputState.EOF;
+                        }
+                        else
+                        {
+                            _content = null;
+                            _inputState = InputState.IDLE;
+                        }
+                        return content;
+
+                    default:
+                        throw new IllegalStateException();
+                }
+
+                if (need)
+                    _channel.needContent(!acquire);
+                if (acquire)
+                    _semaphore.acquire();
+            }
+        }
+    }
 
     public void setTimeout(long ms)
     {
@@ -586,6 +659,8 @@ public class HttpChannelState
                 {
                     case IDLE:
                     case READY:
+                    case EOF:
+                    case EOF_EARLY:
                         return Action.READ_CALLBACK;
 
                     default:
@@ -1361,7 +1436,9 @@ public class HttpChannelState
                 LOG.debug("onEof {}", toStringLocked());
 
             // Force read ready so onAllDataRead can be called
-            _inputState = InputState.READY;
+            _inputState = InputState.EOF_CONSUMED;
+            if (_content == null || !_content.isEof())
+                _content = EOF_EARLY;
             if (_state == State.WAITING)
             {
                 woken = true;

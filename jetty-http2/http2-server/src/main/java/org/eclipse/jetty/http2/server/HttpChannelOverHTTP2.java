@@ -255,7 +255,8 @@ public class HttpChannelOverHTTP2 extends HttpChannel implements Closeable, Writ
 
         ByteBuffer buffer = frame.getData();
         int length = buffer.remaining();
-        boolean handle = onContent(new HttpInput.Content(buffer)
+        boolean endStream = frame.isEndStream();
+        HttpInput.Content content = new HttpInput.Content(buffer)
         {
             @Override
             public void succeeded()
@@ -274,9 +275,11 @@ public class HttpChannelOverHTTP2 extends HttpChannel implements Closeable, Writ
             {
                 return callback.getInvocationType();
             }
-        });
+        };
+        if (endStream)
+            content = new HttpInput.EofContent(content);
+        boolean handle = onContent(content);
 
-        boolean endStream = frame.isEndStream();
         if (endStream)
         {
             boolean handleContent = onContentComplete();
