@@ -552,48 +552,45 @@ public class HttpInput extends ServletInputStream implements Runnable
 
         private Content nextNonEmptyContent(HttpChannelState.Mode mode)
         {
-            if (_rawContent == null)
+            while (true)
             {
-                _rawContent = _channelState.nextContent(mode);
-
-                if (_rawContent == null)
-                    return null;
-            }
-
-            if (_transformedContent != null && _transformedContent.isEmpty())
-            {
-                if (_transformedContent != _rawContent)
-                    _transformedContent.succeeded();
-                _transformedContent = null;
-            }
-
-            while (_transformedContent == null)
-            {
-                if (_interceptor != null)
-                    _transformedContent = _interceptor.readFrom(_rawContent);
-                else
-                    _transformedContent = _rawContent;
-
-                if (_transformedContent != null && _transformedContent.isEmpty())
+                // Use any unconsumed transformed content
+                if (_transformedContent != null)
                 {
+                    if (_transformedContent.hasContent())
+                        return _transformedContent;
+
+                    if (_transformedContent.isEof())
+                    {
+                        if (_rawContent != null)
+                        {
+                            if (_transformedContent != _rawContent)
+                                _transformedContent.succeeded();
+                            _rawContent.succeeded();
+                            _rawContent = null;
+                        }
+                        return _transformedContent;
+                    }
+
                     if (_transformedContent != _rawContent)
                         _transformedContent.succeeded();
                     _transformedContent = null;
                 }
 
-                if (_transformedContent == null)
+                // Use any unconsumed raw content
+                if (_rawContent != null)
                 {
-                    if (_rawContent.isEmpty())
+                    if (_rawContent.hasContent())
                     {
-                        _rawContent.succeeded();
-                        _rawContent = _channelState.nextContent(mode);
-                        if (_rawContent == null)
-                            return null;
+                        _transformedContent = _interceptor == null ? _rawContent : _interceptor.readFrom(_rawContent);
+                        continue;
                     }
-                }
-            }
 
-            return _transformedContent;
+                    _rawContent.succeeded();
+                }
+
+                _rawContent = _channelState.nextContent(mode);
+            }
         }
 
         @Override
@@ -668,6 +665,16 @@ public class HttpInput extends ServletInputStream implements Runnable
         public Content(ByteBuffer content)
         {
             _content = content;
+        }
+
+        public boolean isEof()
+        {
+            return false;
+        }
+
+        public boolean isEarlyEof()
+        {
+            return false;
         }
 
         public ByteBuffer getByteBuffer()
