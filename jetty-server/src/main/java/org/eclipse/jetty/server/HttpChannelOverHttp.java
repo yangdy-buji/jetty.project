@@ -76,12 +76,6 @@ public class HttpChannelOverHttp extends HttpChannel implements HttpParser.Reque
     }
 
     @Override
-    public void produceRawContent()
-    {
-        ((HttpConnection)getEndPoint().getConnection()).parseAndFillForContent();
-    }
-
-    @Override
     public void failContent(Throwable failure)
     {
         ((HttpConnection)getEndPoint().getConnection()).failContent(failure);
@@ -321,21 +315,18 @@ public class HttpChannelOverHttp extends HttpChannel implements HttpParser.Reque
     }
 
     @Override
-    public void onAsyncWaitForContent()
+    public void produceContent()
     {
-        _httpConnection.asyncReadFillInterested();
+        _httpConnection.parseAndFillForContent();
     }
 
     @Override
-    public void onBlockWaitForContent()
+    public void needContent(boolean async)
     {
-        _httpConnection.blockingReadFillInterested();
-    }
-
-    @Override
-    public void onBlockWaitForContentFailure(Throwable failure)
-    {
-        _httpConnection.blockingReadFailure(failure);
+        if (async)
+            _httpConnection.asyncReadFillInterested();
+        else
+            _httpConnection.blockingReadFillInterested();
     }
 
     @Override

@@ -323,8 +323,8 @@ public class HttpConnection extends AbstractConnection implements Runnable, Http
         int filled = Integer.MAX_VALUE;
         while (_parser.inContentState())
         {
-            boolean handled = parseRequestBuffer();
-            if (handled || filled <= 0 || _input.hasContent())
+            boolean handle = parseRequestBuffer();
+            if (handle || filled <= 0)
                 break;
             filled = fillRequestBuffer();
         }
@@ -337,8 +337,8 @@ public class HttpConnection extends AbstractConnection implements Runnable, Http
         {
             // The parser is going generate and forward contents to the HttpInput
             // so it's up to it to fail them individually.
-            parseRequestBuffer();
-            if (filled <= 0 || _input.hasContent())
+            boolean handle = parseRequestBuffer();
+            if (handle || filled <= 0 )
                 break;
             filled = fillRequestBuffer();
         }
@@ -689,7 +689,7 @@ public class HttpConnection extends AbstractConnection implements Runnable, Http
         @Override
         public void succeeded()
         {
-            _input.unblock();
+            _channel.getState().onWakeup();
         }
 
         @Override
@@ -712,7 +712,7 @@ public class HttpConnection extends AbstractConnection implements Runnable, Http
         @Override
         public void succeeded()
         {
-            if (_channel.getState().onProducable())
+            if (_channel.getState().onWakeup())
                 _channel.handle();
         }
 

@@ -213,9 +213,21 @@ newpage
 
 [->HttpChannel: handle
     loop
-        alt inputState=>action
-        ...
-        else READY=>ASYNC_READ
+        HttpChannel->HttpChannelState: nextAction
+        alt inputState
+        else WOKEN
+            note over HttpChannelState
+                WOKEN->IDLE
+            end note
+            autoactivate off
+            HttpChannelState-->HttpChannel: ASYNC_READ
+            autoactivate on
+            ...
+        else READY
+            return ASYNC_READ
+        end
+        alt action
+        else ASYNC_READ
             HttpChannel->HttpInput:isReady
                 note over HttpInput
                     see below
@@ -233,10 +245,9 @@ newpage
                 return
             end
         end
-        ...
     end
 return
-
+|||
 
 Application->HttpInput: isReady
 activate Application
@@ -325,7 +336,7 @@ alt if content arrives
                     ...
                 else UNREADY
                     note over HttpChannelState
-                    UNREADY->IDLE
+                    UNREADY->WOKEN
                     woken=WAITING
                     end note
                     ...

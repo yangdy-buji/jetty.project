@@ -345,7 +345,7 @@ public class HttpTransportOverHTTP2 implements HttpTransport
     {
         HttpChannelOverHTTP2 channel = (HttpChannelOverHTTP2)stream.getAttachment();
         Request request = channel.getRequest();
-        if (request.getHttpInput().hasContent())
+        if (request.getHttpInput().hasRawContent())
             return channel.sendErrorOrAbort("Unexpected content in CONNECT request");
 
         Connection connection = (Connection)request.getAttribute(UPGRADE_CONNECTION_ATTRIBUTE);

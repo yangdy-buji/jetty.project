@@ -124,8 +124,6 @@ public abstract class HttpChannel implements Runnable, HttpOutput.Interceptor
         return new HttpInput(state);
     }
 
-    public abstract void produceRawContent();
-
     public abstract void failContent(Throwable failure);
 
     protected HttpOutput newHttpOutput()
@@ -307,19 +305,6 @@ public abstract class HttpChannel implements Runnable, HttpOutput.Interceptor
         _transientListeners.clear();
     }
 
-    public void onAsyncWaitForContent()
-    {
-    }
-
-    public void onBlockWaitForContent()
-    {
-    }
-
-    public void onBlockWaitForContentFailure(Throwable failure)
-    {
-        getRequest().getHttpInput().failed(failure);
-    }
-
     @Override
     public void run()
     {
@@ -447,18 +432,6 @@ public abstract class HttpChannel implements Runnable, HttpOutput.Interceptor
                     case ASYNC_ERROR:
                     {
                         throw _state.getAsyncContextEvent().getThrowable();
-                    }
-
-                    case READ_REGISTER:
-                    {
-                        onAsyncWaitForContent();
-                        break;
-                    }
-
-                    case READ_PRODUCE:
-                    {
-                        produceRawContent();
-                        break;
                     }
 
                     case READ_CALLBACK:
@@ -711,12 +684,20 @@ public abstract class HttpChannel implements Runnable, HttpOutput.Interceptor
                 request.getFields());
     }
 
+    public void produceContent()
+    {
+    }
+
+    public void needContent(boolean async)
+    {
+    }
+
     public boolean onContent(HttpInput.Content content)
     {
         if (LOG.isDebugEnabled())
             LOG.debug("onContent {} {}", this, content);
         _combinedListener.onRequestContent(_request, content.getByteBuffer());
-        return _request.getHttpInput().addRawContent(content);
+        return _state.onContent(content);
     }
 
     public boolean onContentComplete()
@@ -739,7 +720,7 @@ public abstract class HttpChannel implements Runnable, HttpOutput.Interceptor
     {
         if (LOG.isDebugEnabled())
             LOG.debug("onRequestComplete {}", this);
-        boolean result = _request.getHttpInput().eof();
+        boolean result = _request.getHttpInput().eof(); // TODO why isn't this in onContentComplete
         _combinedListener.onRequestEnd(_request);
         return result;
     }

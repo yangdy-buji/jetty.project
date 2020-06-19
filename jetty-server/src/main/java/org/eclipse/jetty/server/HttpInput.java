@@ -21,7 +21,6 @@ package org.eclipse.jetty.server;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.Objects;
-import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 import javax.servlet.ReadListener;
@@ -49,13 +48,6 @@ public class HttpInput extends ServletInputStream implements Runnable
 
     private final HttpChannelState _channelState;
     private final ContentProducer _contentProducer = new ContentProducer();
-    // This semaphore is only used in blocking mode, and a standard lock with a condition variable
-    // cannot work here because there is a race condition between the _contentProducer.read() call
-    // and the blockForContent() call: content can be produced any time between these two calls so
-    // the call to unblock() done by the content-producing thread to wake up the user thread executing read()
-    // must 'remember' the unblock() call, such as if it happens before the thread executing read() reaches the
-    // blockForContent() method, it will not get stuck in it forever waiting for an unblock() call it missed.
-    private final Semaphore _semaphore = new Semaphore(0);
 
     private Eof _eof = Eof.NOT_YET;
     private Throwable _error;
@@ -113,65 +105,6 @@ public class HttpInput extends ServletInputStream implements Runnable
             _contentProducer.setInterceptor(new ChainedInterceptor(currentInterceptor, interceptor));
     }
 
-    /**
-     * Adds some content to this input stream.
-     *
-     * @param content the content to add
-     * @return true if content channel woken for read
-     */
-    public boolean addRawContent(Content content)
-    {
-        if (LOG.isDebugEnabled())
-            LOG.debug("addContent {} {}", content, _contentProducer);
-        if (_firstByteTimeStamp == Long.MIN_VALUE)
-        {
-            _firstByteTimeStamp = System.nanoTime();
-            if (_firstByteTimeStamp == Long.MIN_VALUE)
-                _firstByteTimeStamp++;
-        }
-        _contentProducer.addRawContent(content);
-
-        if (isAsync())
-            // let the HttpChannel.handle loop do this producing.
-            return _channelState.onRawContentAdded();
-        return false;
-    }
-
-    public boolean hasContent()
-    {
-        return _contentProducer.hasRawContent();
-    }
-
-    // There are 3 sources which can call this method in parallel:
-    // 1) HTTP2 read() that has a demand served on the app thread;
-    // 2) HTTP2 read() that has a demand served by a server thread;
-    // 3) onIdleTimeout called by a server thread;
-    // which means the semaphore can have up to 2 permits.
-    public void unblock()
-    {
-        if (LOG.isDebugEnabled())
-            LOG.debug("signalling blocked thread to wake up");
-        if (!isError() && !_eof.isEof() && _semaphore.availablePermits() > 1)
-            throw new AssertionError(
-                String.format("Only one thread should call unblock and only if we are blocked. e=%b eof=%b p=%d",
-                    isError(), _eof.isEof(), _semaphore.availablePermits()));
-        _semaphore.release();
-    }
-
-    // try to unblock... but only if somebody is blocking
-    public boolean tryUnblock()
-    {
-        // TODO YUUUUUUUUUUUUUUUUUUUUUUUUUUUUUCK!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!1
-        if (LOG.isDebugEnabled())
-            LOG.debug("try signalling blocked thread to wake up");
-        if (_semaphore.availablePermits() == 0)
-        {
-            _semaphore.release();
-            return true;
-        }
-        return false;
-    }
-
     public long getContentLength()
     {
         return _contentProducer.getRawContentArrived();
@@ -186,6 +119,7 @@ public class HttpInput extends ServletInputStream implements Runnable
      */
     public boolean earlyEOF()
     {
+        // TODO investigate why this is only called for HTTP1? What about H2 resets?
         if (LOG.isDebugEnabled())
             LOG.debug("received early EOF");
         _eof = Eof.EARLY_EOF;
@@ -202,6 +136,8 @@ public class HttpInput extends ServletInputStream implements Runnable
      */
     public boolean eof()
     {
+        // TODO why not have isLast on HttpInput.Content and let it flow through
+        // interceptors normally, and content can then change HttpChannelState.inputState
         if (LOG.isDebugEnabled())
             LOG.debug("received EOF");
         _eof = Eof.EOF;
@@ -239,7 +175,7 @@ public class HttpInput extends ServletInputStream implements Runnable
     public boolean onIdleTimeout(Throwable x)
     {
         boolean neverDispatched = _channelState.isIdle();
-        boolean waitingForContent = _contentProducer.available() == 0 && !_eof.isEof();
+        boolean waitingForContent = available() == 0 && !_eof.isEof();
         if ((waitingForContent || neverDispatched) && !isError())
         {
             x.addSuppressed(new Throwable("HttpInput idle timeout"));
@@ -280,17 +216,12 @@ public class HttpInput extends ServletInputStream implements Runnable
     @Override
     public boolean isReady()
     {
-        // calling _contentProducer.available() might change the _eof state, so the following test order matters
-        if (_contentProducer.available() > 0 || _eof.isEof())
-        {
-            if (LOG.isDebugEnabled())
-                LOG.debug("isReady? true");
+        if (_eof.isEof())
             return true;
-        }
+        Content content = _contentProducer.nextNonEmptyContent(HttpChannelState.Mode.ASYNC);
         if (LOG.isDebugEnabled())
-            LOG.debug("isReady? false");
-        _channelState.onReadUnready();
-        return false;
+            LOG.debug("isReady? {}", content);
+        return content != null;
     }
 
     @Override
@@ -312,30 +243,15 @@ public class HttpInput extends ServletInputStream implements Runnable
         }
         else
         {
-            if (_contentProducer.available() > 0)
-            {
-                woken = _channelState.onReadReady();
-            }
-            else if (_eof.isEof())
-            {
-                woken = _channelState.onReadEof();
-            }
-            else
-            {
-                _channelState.onReadUnready();
-                woken = false;
-            }
+            woken = _eof.isEof()
+                ? _channelState.onReadEof()
+                : isReady();
         }
 
         if (LOG.isDebugEnabled())
             LOG.debug("setReadListener woken=" + woken);
         if (woken)
             scheduleReadListenerNotification();
-    }
-
-    public boolean hasReadListener()
-    {
-        return _readListener != null;
     }
 
     private void scheduleReadListenerNotification()
@@ -356,6 +272,10 @@ public class HttpInput extends ServletInputStream implements Runnable
     @Override
     public int read(byte[] b, int off, int len) throws IOException
     {
+        boolean async = isAsync();
+        if (LOG.isDebugEnabled())
+            LOG.debug("read async = {}", async);
+
         // Calculate minimum request rate for DOS protection
         long minRequestDataRate = _channelState.getHttpChannel().getHttpConfiguration().getMinRequestDataRate();
         if (minRequestDataRate > 0 && _firstByteTimeStamp != Long.MIN_VALUE)
@@ -375,95 +295,46 @@ public class HttpInput extends ServletInputStream implements Runnable
             }
         }
 
-        while (true)
+        Content content = _contentProducer.nextNonEmptyContent(async? HttpChannelState.Mode.ASYNC: HttpChannelState.Mode.BLOCK);
+        if (LOG.isDebugEnabled())
+            LOG.debug("read content {}", content);
+        if (content != null)
+            return content.get(b, off, len);
+
+        if (LOG.isDebugEnabled())
+            LOG.debug("read error = " + _error);
+        if (_error != null)
+            throw new IOException(_error);
+
+        if (LOG.isDebugEnabled())
+            LOG.debug("read EOF = {}", _eof);
+        if (_eof.isEarly())
+            throw new EofException("Early EOF");
+
+        if (_eof.isEof())
         {
-            // The semaphore's permits must be drained before we call read() because:
-            // 1) _contentProducer.read() may call unblock() which enqueues a permit even if the content was produced
-            //    by the exact thread that called HttpInput.read(), hence leaving around an unconsumed permit that would
-            //    be consumed the next time HttpInput.read() is called, mistakenly believing that content was produced.
-            // 2) HTTP2 demand served asynchronously does call unblock which does enqueue a permit in the semaphore;
-            //    this permit would then be mistakenly consumed by the next call to blockForContent() once all the produced
-            //    content got consumed.
-            if (!isAsync())
-                _semaphore.drainPermits();
-            int read = _contentProducer.read(b, off, len);
+            _eof = Eof.CONSUMED_EOF;
+            boolean wasInAsyncWait = isAsync() && _channelState.onReadEof();
             if (LOG.isDebugEnabled())
-                LOG.debug("read produced {} byte(s)", read);
-            if (read > 0)
-                return read;
-
-            if (LOG.isDebugEnabled())
-                LOG.debug("read error = " + _error);
-            if (_error != null)
-                throw new IOException(_error);
-
-            if (LOG.isDebugEnabled())
-                LOG.debug("read EOF = {}", _eof);
-            if (_eof.isEarly())
-                throw new EofException("Early EOF");
-
-            if (LOG.isDebugEnabled())
-                LOG.debug("read async = {}", isAsync());
-            if (!isAsync())
-            {
-                if (_eof.isEof())
-                {
-                    _eof = Eof.CONSUMED_EOF;
-                    if (LOG.isDebugEnabled())
-                        LOG.debug("read on EOF, switching to CONSUMED_EOF and returning");
-                    return -1;
-                }
-                if (LOG.isDebugEnabled())
-                    LOG.debug("read blocked");
-                blockForContent();
-                if (LOG.isDebugEnabled())
-                    LOG.debug("read unblocked");
-            }
-            else
-            {
-                if (_eof.isEof())
-                {
-                    _eof = Eof.CONSUMED_EOF;
-                    boolean wasInAsyncWait = _channelState.onReadEof();
-                    if (LOG.isDebugEnabled())
-                        LOG.debug("async read on EOF (was in async wait? {}), switching to CONSUMED_EOF and returning", wasInAsyncWait);
-                    if (wasInAsyncWait)
-                        scheduleReadListenerNotification();
-                    return -1;
-                }
-                else
-                {
-                    //TODO returning 0 breaks the InputStream contract. Shouldn't IOException be thrown instead?
-                    return 0;
-                }
-            }
+                LOG.debug("read on EOF. async={} wasWait={}", async, wasInAsyncWait);
+            if (wasInAsyncWait)
+                scheduleReadListenerNotification();
+            return -1;
         }
+
+        // TODO better handling here???
+        if (async)
+            return 0;
+        throw new IllegalStateException();
     }
 
     @Override
     public int available()
     {
-        int available = _contentProducer.available();
+        Content content = _contentProducer.nextNonEmptyContent(HttpChannelState.Mode.POLL);
         if (LOG.isDebugEnabled())
-            LOG.debug("available = {}", available);
-        return available;
-    }
-
-    private void blockForContent()
-    {
-        try
-        {
-            _channelState.getHttpChannel().onBlockWaitForContent(); // switches on fill interested
-            if (LOG.isDebugEnabled())
-                LOG.debug("waiting for signal to wake up");
-            _semaphore.acquire();
-            if (LOG.isDebugEnabled())
-                LOG.debug("signalled to wake up");
-        }
-        catch (Throwable x)
-        {
-            _channelState.getHttpChannel().onBlockWaitForContentFailure(x);
-        }
+            LOG.debug("available = {}", content);
+        return content == null ? 0 : content.remaining();
     }
 
     /* Runnable */
@@ -679,31 +550,12 @@ public class HttpInput extends ServletInputStream implements Runnable
             }
         }
 
-        int available()
-        {
-            synchronized (this)
-            {
-                Content content = nextNonEmptyContent();
-                return content == null ? 0 : content.remaining();
-            }
-        }
-
-        int read(byte[] b, int off, int len)
-        {
-            synchronized (this)
-            {
-                if (LOG.isDebugEnabled())
-                    LOG.debug("{} read", this);
-                Content content = nextNonEmptyContent();
-                return content == null ? 0 : content.get(b, off, len);
-            }
-        }
-
-        private Content nextNonEmptyContent()
+        private Content nextNonEmptyContent(HttpChannelState.Mode mode)
         {
             if (_rawContent == null)
             {
-                _channelState.getHttpChannel().produceRawContent();
+                _rawContent = _channelState.nextContent(mode);
+
                 if (_rawContent == null)
                     return null;
             }
@@ -734,10 +586,7 @@ public class HttpInput extends ServletInputStream implements Runnable
                     if (_rawContent.isEmpty())
                     {
                         _rawContent.succeeded();
-                        _rawContent = null;
-                        if (LOG.isDebugEnabled())
-                            LOG.debug("produceContent {}", _contentProducer);
-                        _channelState.getHttpChannel().produceRawContent();
+                        _rawContent = _channelState.nextContent(mode);
                         if (_rawContent == null)
                             return null;
                     }

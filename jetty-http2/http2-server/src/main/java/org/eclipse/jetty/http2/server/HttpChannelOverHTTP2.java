@@ -21,6 +21,7 @@ package org.eclipse.jetty.http2.server;
 import java.io.Closeable;
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 
 import org.eclipse.jetty.http.BadMessageException;
@@ -131,17 +132,9 @@ public class HttpChannelOverHTTP2 extends HttpChannel implements Closeable, Writ
             _delayedUntilContent = getHttpConfiguration().isDelayDispatchUntilContent() &&
                     !endStream && !_expect100Continue && !connect;
 
-            // Delay the demand of DATA frames for CONNECT with :protocol
-            // or for normal requests expecting 100 continue.
-            if (!connect)
-            {
-                if (!_expect100Continue)
-                    getStream().demand(1);
-            }
-            else if (request.getProtocol() == null)
-            {
+            // We do demand here if delaying for content or connection without a protocol
+            if (_delayedUntilContent || connect && request.getProtocol() == null )
                 getStream().demand(1);
-            }
 
             if (LOG.isDebugEnabled())
             {
@@ -216,17 +209,6 @@ public class HttpChannelOverHTTP2 extends HttpChannel implements Closeable, Writ
         getHttpTransport().recycle();
     }
 
-    public void onAsyncWaitForContent()
-    {
-        getStream().demand(1);
-    }
-
-    @Override
-    public void onBlockWaitForContent()
-    {
-        getStream().demand(1);
-    }
-
     @Override
     protected void commit(MetaData.Response info)
     {
@@ -240,9 +222,26 @@ public class HttpChannelOverHTTP2 extends HttpChannel implements Closeable, Writ
         }
     }
 
+    final AtomicBoolean demanding = new AtomicBoolean(false);
+
+    @Override
+    public void produceContent()
+    {
+        if (demanding.compareAndSet(false, true))
+            getStream().demand(1);
+    }
+
+    @Override
+    public void needContent(boolean async)
+    {
+        if (demanding.compareAndSet(false, true))
+            getStream().demand(1);
+    }
+
     @Override
     public Runnable onData(DataFrame frame, final Callback callback)
     {
+        demanding.set(false);
         Stream stream = getStream();
         if (stream.isReset())
         {
@@ -285,34 +284,22 @@ public class HttpChannelOverHTTP2 extends HttpChannel implements Closeable, Writ
             handle |= handleContent | handleRequest;
         }
 
-        // TODO YUUUUUUUUUUUUUUUUUUUUUUUUUUCK!
-        boolean unblocked = false;
-        if (!getRequest().getHttpInput().hasReadListener())
-            unblocked = getRequest().getHttpInput().tryUnblock();
-
         if (LOG.isDebugEnabled())
         {
-            LOG.debug("HTTP2 Request #{}/{}: {} bytes of {} content, handle={}, unblocked={}",
+            boolean async = !getRequest().getHttpInput().isAsync();
+            LOG.debug("HTTP2 Request #{}/{}: {} bytes of {} content, handle={}, async={}",
                     stream.getId(),
                     Integer.toHexString(stream.getSession().hashCode()),
                     length,
                     endStream ? "last" : "some",
                     handle,
-                    unblocked);
+                    async);
         }
 
         boolean wasDelayed = _delayedUntilContent;
         _delayedUntilContent = false;
         // TODO ??? return (!unblocked && (handle || wasDelayed)) ? this : null;
         return (handle || wasDelayed) ? this : null;
-    }
-
-    @Override
-    public void produceRawContent()
-    {
-        // If we are IDLE or PRODUCING, then we can become REGISTERED and demand content here.
-        if (getState().onDemand())
-            getStream().demand(1);
     }
 
     @Override

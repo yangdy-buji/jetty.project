@@ -5,6 +5,7 @@ IDLE:
 PRODUCING:
 BLOCKING:
 UNREADY:
+WOKEN:
 READY:
 
 
@@ -18,12 +19,12 @@ UNREADY --> READY : onContent
 IDLE --> READY : onContent
 
 BLOCKING -up-> IDLE : onWakeup
-UNREADY -left-> IDLE : onWakeup
+UNREADY -up-> WOKEN : onWakeup
+WOKEN -right->IDLE : nextAction
 
-
-PRODUCING -left-> IDLE : POLL
+PRODUCING -up-> IDLE : POLL
 PRODUCING --> BLOCKING : BLOCK
-PRODUCING -left-> UNREADY : ASYNC
+PRODUCING --> UNREADY : ASYNC
 
 READY -up-> IDLE : return content
 @enduml
