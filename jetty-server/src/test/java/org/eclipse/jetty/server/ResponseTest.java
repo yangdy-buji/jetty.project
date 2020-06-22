@@ -178,11 +178,6 @@ public class ResponseTest
         })
         {
             @Override
-            public void produceRawContent()
-            {
-            }
-
-            @Override
             public void failContent(Throwable failure)
             {
             }

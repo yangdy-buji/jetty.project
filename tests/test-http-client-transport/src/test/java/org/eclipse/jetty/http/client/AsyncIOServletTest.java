@@ -1200,7 +1200,7 @@ public class AsyncIOServletTest extends AbstractTest<AsyncIOServletTest.AsyncTra
                     Content saved;
 
                     @Override
-                    public Content readFrom(Content content)
+                    public Content readFrom(Content content) throws IOException
                     {
                         // System.err.printf("readFrom s=%d saved=%b %s%n",state,saved!=null,content);
                         switch (state)

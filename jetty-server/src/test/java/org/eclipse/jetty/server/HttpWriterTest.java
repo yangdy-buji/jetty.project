@@ -49,11 +49,6 @@ public class HttpWriterTest
         HttpChannel channel = new HttpChannel(new MockConnector(), new HttpConfiguration(), null, null)
         {
             @Override
-            public void produceRawContent()
-            {
-            }
-
-            @Override
             public void failContent(Throwable failure)
             {
             }

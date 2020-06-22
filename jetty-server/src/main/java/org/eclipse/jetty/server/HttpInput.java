@@ -35,7 +35,7 @@ import org.eclipse.jetty.util.component.Destroyable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import static org.eclipse.jetty.server.HttpChannelState.EOF_CONSUMED;
+import static org.eclipse.jetty.server.HttpChannelState.EOF_COMPLETE;
 
 /**
  * <p> While this class is-a Runnable, it should never be dispatched in it's own thread. It is a runnable only so that the calling thread can use {@link
@@ -137,10 +137,7 @@ public class HttpInput extends ServletInputStream implements Runnable
     {
         if (LOG.isDebugEnabled())
             LOG.debug("consume all");
-        _contentProducer.consumeAll();
-        if (_contentProducer.consumeAll() && isFinished())
-            return !isError();
-        return false;
+        return _contentProducer.consumeAll();
     }
 
     public boolean isAsync()
@@ -150,6 +147,7 @@ public class HttpInput extends ServletInputStream implements Runnable
 
     public boolean onIdleTimeout(Throwable x)
     {
+        /*
         boolean neverDispatched = _channelState.isIdle();
         boolean waitingForContent = available() == 0 && !_eof.isEof();
         if ((waitingForContent || neverDispatched) && !isError())
@@ -160,22 +158,14 @@ public class HttpInput extends ServletInputStream implements Runnable
                 return _channelState.onRawContentAdded();
             unblock();
         }
+
+         */
         return false;
     }
 
     public boolean onContentError(Throwable x)
     {
-        if (LOG.isDebugEnabled())
-            LOG.debug("failed " + x);
-        if (_error != null && _error != x)
-            _error.addSuppressed(x);
-        else
-            _error = x;
-
-        if (isAsync())
-            return _channelState.onRawContentAdded();
-        unblock();
-        return false;
+        return _channelState.onContent(new ErrorContent(x));
     }
 
     /* ServletInputStream */
@@ -183,10 +173,16 @@ public class HttpInput extends ServletInputStream implements Runnable
     @Override
     public boolean isFinished()
     {
-        boolean finished = !_contentProducer.hasRawContent() && _eof.isConsumed();
-        if (LOG.isDebugEnabled())
-            LOG.debug("isFinished? {}", finished);
-        return finished;
+        // TODO review the need for this method
+        try
+        {
+            Content content = _channelState.nextContent(HttpChannelState.Mode.POLL);
+            return content != null && content.isEmpty() && content.isLast();
+        }
+        catch (InterruptedException e)
+        {
+            return false;
+        }
     }
 
     @Override
@@ -216,24 +212,9 @@ public class HttpInput extends ServletInputStream implements Runnable
         //illegal if async not started
         if (!_channelState.isAsyncStarted())
             throw new IllegalStateException("Async not started");
-
         if (LOG.isDebugEnabled())
-            LOG.debug("setReadListener error={} l={} {}", _error, readListener, this);
-        boolean woken;
-        if (isError())
-        {
-            woken = _channelState.onReadReady();
-        }
-        else
-        {
-            woken = _eof.isEof()
-                ? _channelState.onEofConsumed()
-                : isReady();
-        }
-
-        if (LOG.isDebugEnabled())
-            LOG.debug("setReadListener woken=" + woken);
-        if (woken)
+            LOG.debug("setReadListener l={} {}", readListener, this);
+        if (isReady())
             scheduleReadListenerNotification();
     }
 
@@ -284,12 +265,11 @@ public class HttpInput extends ServletInputStream implements Runnable
         if (content != null)
         {
             len = content.get(b, off, len);
-            if (len < 0)
-                _channelState.onEofConsumed();
+            if (len < 0 && _channelState.onEofConsumed())
+                scheduleReadListenerNotification();
             return len;
         }
 
-        // TODO better handling here???
         if (async)
             return 0;
         throw new IllegalStateException();
@@ -345,9 +325,9 @@ public class HttpInput extends ServletInputStream implements Runnable
                 }
 
                 // TODO not quiet right
-                if (content.isEof() && content != EOF_CONSUMED)
+                if (content.isLast() && content != EOF_COMPLETE)
                 {
-                    _channelState.onContent(EOF_CONSUMED);
+                    _channelState.onContent(EOF_COMPLETE);
                     _readListener.onAllDataRead();
                 }
             }
@@ -404,14 +384,6 @@ public class HttpInput extends ServletInputStream implements Runnable
             }
         }
 
-        boolean hasRawContent()
-        {
-            synchronized (this)
-            {
-                return _rawContent != null;
-            }
-        }
-
         Interceptor getInterceptor()
         {
             synchronized (this)
@@ -443,7 +415,7 @@ public class HttpInput extends ServletInputStream implements Runnable
                             return false;
                         if (content.hasContent())
                             content.skip(content.remaining());
-                        else if (content.isEof())
+                        else if (content.isLast())
                             return true;
                     }
                 }
@@ -466,7 +438,7 @@ public class HttpInput extends ServletInputStream implements Runnable
                     if (_transformedContent.hasContent())
                         return _transformedContent;
 
-                    if (_transformedContent.isEof())
+                    if (_transformedContent.isLast())
                     {
                         // The last content is succeeded once it is consumed.
                         // We null the raw content to indicate that succeeded has been called,
@@ -552,7 +524,7 @@ public class HttpInput extends ServletInputStream implements Runnable
         }
 
         @Override
-        public Content readFrom(Content content)
+        public Content readFrom(Content content) throws IOException
         {
             Content c = getPrev().readFrom(content);
             if (c == null)
@@ -578,9 +550,10 @@ public class HttpInput extends ServletInputStream implements Runnable
          * that all the data is consumed by the interceptor.
          * @return The intercepted content or null if interception is completed for that content.
          */
-        Content readFrom(Content content);
+        Content readFrom(Content content) throws IOException;
     }
 
+    // TODO should Content be an interface and optinally a Callback?
     public static class Content implements Callback
     {
         protected final ByteBuffer _content;
@@ -590,7 +563,7 @@ public class HttpInput extends ServletInputStream implements Runnable
             _content = content;
         }
 
-        public boolean isEof()
+        public boolean isLast()
         {
             return false;
         }
@@ -653,7 +626,7 @@ public class HttpInput extends ServletInputStream implements Runnable
         }
 
         @Override
-        public boolean isEof()
+        public boolean isLast()
         {
             return true; // TODO maybe not ???
         }
@@ -678,7 +651,15 @@ public class HttpInput extends ServletInputStream implements Runnable
         }
     }
 
-    public static class EofContent extends Content
+    /**
+     * StickyContents are kept in HttpChannelState even after a {@link HttpChannelState#nextContent(HttpChannelState.Mode)}
+     * call. Used to remember EOF and Errors.
+     */
+    public interface StickyContent
+    {
+    }
+
+    public static class EofContent extends Content implements StickyContent
     {
         public EofContent()
         {
@@ -691,19 +672,19 @@ public class HttpInput extends ServletInputStream implements Runnable
         }
 
         @Override
-        public boolean isEof()
+        public boolean isLast()
         {
             return true;
         }
 
         @Override
-        public int get(byte[] buffer, int offset, int length) throws IOException
+        public int get(byte[] buffer, int offset, int length)
         {
             return -1;
         }
     }
 
-    public static class ErrorContent extends Content
+    public static class ErrorContent extends Content implements StickyContent
     {
         final Throwable _error;
 
@@ -714,7 +695,7 @@ public class HttpInput extends ServletInputStream implements Runnable
         }
 
         @Override
-        public boolean isEof()
+        public boolean isLast()
         {
             return true;
         }

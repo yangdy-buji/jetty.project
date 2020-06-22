@@ -102,8 +102,11 @@ public class HttpChannelState
         COMPLETED    // Response is completed
     }
 
-    /*
-     * The input readiness state, which works together with {@link HttpInput.State}
+    /**
+     * The input readiness state.
+     * The input state is kept in HttpChannelState rather than in {@link HttpInput} to avoid deadlock,
+     * as HttpInput sometimes needs to check for {@link State#WAITING} and {@link #nextAction(boolean)}
+     * needs to check the InputState.
      */
     private enum InputState
     {
@@ -127,7 +130,7 @@ public class HttpChannelState
     } ;
 
     static HttpInput.EofContent EOF = new HttpInput.EofContent();
-    static HttpInput.EofContent EOF_CONSUMED = new HttpInput.EofContent();
+    static HttpInput.EofContent EOF_COMPLETE = new HttpInput.EofContent();
 
     /*
      * The output committed state, which works together with {@link HttpOutput.State}
@@ -315,17 +318,46 @@ public class HttpChannelState
                 case UNREADY:
                     _inputState = InputState.READY;
                     _content = content;
-                    if (_state == State.WAITING)
+                    if (_content != EOF_COMPLETE && _state == State.WAITING)
                     {
                         _state = State.WOKEN;
                         woken = true;
                     }
                     break;
+
                 case IDLE:
+                case WOKEN:
                 case PRODUCING:
                     _inputState = InputState.READY;
                     _content = content;
                     break;
+
+                case EOF:
+                    if (!content.isLast())
+                        throw new IllegalStateException();
+                    if (_content != content)
+                        _content.succeeded();
+                    _content = content;
+                    break;
+
+                case READY:
+                    if (!(content instanceof HttpInput.ErrorContent))
+                        throw new IllegalStateException();
+
+                    HttpInput.ErrorContent errorContent = (HttpInput.ErrorContent) content;
+                    if (_content instanceof HttpInput.ErrorContent)
+                    {
+                        HttpInput.ErrorContent existingErrorContent = ((HttpInput.ErrorContent)_content);
+                        if (existingErrorContent._error != errorContent._error)
+                            existingErrorContent._error.addSuppressed(errorContent._error);
+                    }
+                    else
+                    {
+                        _content.failed(errorContent._error);
+                        _content = content;
+                    }
+                    break;
+
                 default:
                     throw new IllegalStateException();
             }
@@ -352,7 +384,7 @@ public class HttpChannelState
 
                     case IDLE:
                         _inputState = InputState.PRODUCING;
-                        break;
+                        break; // TODO more efficient to fall through here.
 
                     case PRODUCING:
                         switch (mode)
@@ -372,13 +404,15 @@ public class HttpChannelState
                         break;
 
                     case UNREADY:
+                    case WOKEN:
                         return null;
 
                     case READY:
                         HttpInput.Content content = _content;
-                        if (_content.isEof())
+                        if (_content.isLast())
                         {
-                            _content = EOF;
+                            if (!(content instanceof HttpInput.StickyContent))
+                                _content = EOF;
                             _inputState = InputState.EOF;
                         }
                         else
@@ -655,7 +689,7 @@ public class HttpChannelState
                     case IDLE:
                     case READY:
                     case EOF:
-                        if (_content != EOF_CONSUMED)
+                        if (_content != EOF_COMPLETE)
                             return Action.READ_CALLBACK;
                         break;
 
@@ -1434,7 +1468,7 @@ public class HttpChannelState
             if (_inputState != InputState.EOF)
                 throw new IllegalStateException();
 
-            if (_content != EOF_CONSUMED && _state == State.WAITING)
+            if (_content != EOF_COMPLETE && _state == State.WAITING)
             {
                 woken = true;
                 _state = State.WOKEN;

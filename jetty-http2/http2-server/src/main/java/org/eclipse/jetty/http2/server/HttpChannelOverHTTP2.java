@@ -259,6 +259,12 @@ public class HttpChannelOverHTTP2 extends HttpChannel implements Closeable, Writ
         HttpInput.Content content = new HttpInput.Content(buffer)
         {
             @Override
+            public boolean isLast()
+            {
+                return endStream;
+            }
+
+            @Override
             public void succeeded()
             {
                 callback.succeeded();
@@ -276,8 +282,6 @@ public class HttpChannelOverHTTP2 extends HttpChannel implements Closeable, Writ
                 return callback.getInvocationType();
             }
         };
-        if (endStream)
-            content = new HttpInput.EofContent(content);
         boolean handle = onContent(content);
 
         if (endStream)

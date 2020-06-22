@@ -63,11 +63,6 @@ public class SpnegoAuthenticatorTest
             }
 
             @Override
-            public void produceRawContent()
-            {
-            }
-
-            @Override
             public void failContent(Throwable failure)
             {
             }
@@ -105,11 +100,6 @@ public class SpnegoAuthenticatorTest
             public Server getServer()
             {
                 return null;
-            }
-
-            @Override
-            public void produceRawContent()
-            {
             }
 
             @Override
