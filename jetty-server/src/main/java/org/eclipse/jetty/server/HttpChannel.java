@@ -369,7 +369,7 @@ public abstract class HttpChannel implements Runnable, HttpOutput.Interceptor
                     }
 
                     case ASYNC_TIMEOUT:
-                        _state.onTimeout();
+                        _state.onAsyncTimeout();
                         break;
 
                     case SEND_ERROR:
@@ -438,15 +438,10 @@ public abstract class HttpChannel implements Runnable, HttpOutput.Interceptor
                     {
                         ContextHandler handler = _state.getContextHandler();
                         HttpInput httpInput = _request.getHttpInput();
-                        // We call isReady here so that if rawContent is consumed without
-                        // producing real content, then another callback is scheduled.
-                        if (httpInput.isError() || httpInput.isReady())
-                        {
-                            if (handler != null)
-                                handler.handle(_request, httpInput);
-                            else
-                                httpInput.run();
-                        }
+                        if (handler != null)
+                            handler.handle(_request, httpInput);
+                        else
+                            httpInput.run();
                         break;
                     }
 
@@ -597,7 +592,7 @@ public abstract class HttpChannel implements Runnable, HttpOutput.Interceptor
         if (isCommitted())
             abort(failure);
         else
-            _state.onError(failure);
+            _state.onHandleException(failure);
     }
 
     /**

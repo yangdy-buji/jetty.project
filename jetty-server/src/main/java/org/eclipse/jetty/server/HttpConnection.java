@@ -689,13 +689,14 @@ public class HttpConnection extends AbstractConnection implements Runnable, Http
         @Override
         public void succeeded()
         {
-            _channel.getState().onWakeup();
+            if (_channel.getState().onContentProducable())
+                throw new IllegalStateException();
         }
 
         @Override
         public void failed(Throwable x)
         {
-            _input.failed(x);
+            _input.onContentError(x);
         }
 
         @Override
@@ -712,15 +713,22 @@ public class HttpConnection extends AbstractConnection implements Runnable, Http
         @Override
         public void succeeded()
         {
-            if (_channel.getState().onWakeup())
+            if (_channel.getState().onContentProducable())
                 _channel.handle();
         }
 
         @Override
         public void failed(Throwable x)
         {
-            if (_input.failed(x))
+            if (_input.onContentError(x))
                 _channel.handle();
+        }
+
+        @Override
+        public InvocationType getInvocationType()
+        {
+            // This callback can call handle, which may block.
+            return InvocationType.BLOCKING;
         }
     }
 

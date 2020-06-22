@@ -363,7 +363,7 @@ public class HttpChannelOverHTTP2 extends HttpChannel implements Closeable, Writ
     public Runnable onFailure(Throwable failure, Callback callback)
     {
         getHttpTransport().onStreamFailure(failure);
-        boolean handle = getRequest().getHttpInput().failed(failure);
+        boolean handle = getRequest().getHttpInput().onContentError(failure);
         consumeInput();
         return new FailureTask(failure, callback, handle);
     }

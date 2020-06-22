@@ -23,19 +23,19 @@ import java.io.InterruptedIOException;
 import java.nio.ByteBuffer;
 import java.util.Objects;
 import java.util.concurrent.TimeUnit;
-import java.util.function.Consumer;
 import javax.servlet.ReadListener;
 import javax.servlet.ServletInputStream;
 
 import org.eclipse.jetty.http.BadMessageException;
 import org.eclipse.jetty.http.HttpStatus;
-import org.eclipse.jetty.io.EofException;
 import org.eclipse.jetty.server.handler.ContextHandler;
 import org.eclipse.jetty.util.BufferUtil;
 import org.eclipse.jetty.util.Callback;
 import org.eclipse.jetty.util.component.Destroyable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import static org.eclipse.jetty.server.HttpChannelState.EOF_CONSUMED;
 
 /**
  * <p> While this class is-a Runnable, it should never be dispatched in it's own thread. It is a runnable only so that the calling thread can use {@link
@@ -50,7 +50,6 @@ public class HttpInput extends ServletInputStream implements Runnable
     private final HttpChannelState _channelState;
     private final ContentProducer _contentProducer = new ContentProducer();
 
-    private Throwable _error;
     private ReadListener _readListener;
     private long _firstByteTimeStamp = Long.MIN_VALUE;
 
@@ -66,7 +65,6 @@ public class HttpInput extends ServletInputStream implements Runnable
         if (LOG.isDebugEnabled())
             LOG.debug("recycle");
         _contentProducer.recycle();
-        _error = null;
         _readListener = null;
         _firstByteTimeStamp = Long.MIN_VALUE;
     }
@@ -139,20 +137,10 @@ public class HttpInput extends ServletInputStream implements Runnable
     {
         if (LOG.isDebugEnabled())
             LOG.debug("consume all");
-        _contentProducer.consumeTransformedContent(this::failContent, new IOException("Unconsumed content"));
-        if (_eof.isEof())
-            _eof = Eof.CONSUMED_EOF;
-
-        if (isFinished())
+        _contentProducer.consumeAll();
+        if (_contentProducer.consumeAll() && isFinished())
             return !isError();
-
-        _eof = Eof.EARLY_EOF;
         return false;
-    }
-
-    public boolean isError()
-    {
-        return _error != null;
     }
 
     public boolean isAsync()
@@ -175,7 +163,7 @@ public class HttpInput extends ServletInputStream implements Runnable
         return false;
     }
 
-    public boolean failed(Throwable x)
+    public boolean onContentError(Throwable x)
     {
         if (LOG.isDebugEnabled())
             LOG.debug("failed " + x);
@@ -230,7 +218,7 @@ public class HttpInput extends ServletInputStream implements Runnable
             throw new IllegalStateException("Async not started");
 
         if (LOG.isDebugEnabled())
-            LOG.debug("setReadListener error=" + _error + " eof=" + _eof + " " + _contentProducer);
+            LOG.debug("setReadListener error={} l={} {}", _error, readListener, this);
         boolean woken;
         if (isError())
         {
@@ -239,7 +227,7 @@ public class HttpInput extends ServletInputStream implements Runnable
         else
         {
             woken = _eof.isEof()
-                ? _channelState.onReadEof()
+                ? _channelState.onEofConsumed()
                 : isReady();
         }
 
@@ -297,7 +285,7 @@ public class HttpInput extends ServletInputStream implements Runnable
         {
             len = content.get(b, off, len);
             if (len < 0)
-                _channelState.onReadEof();
+                _channelState.onEofConsumed();
             return len;
         }
 
@@ -324,100 +312,55 @@ public class HttpInput extends ServletInputStream implements Runnable
         }
     }
 
-    /* Runnable */
-
     /*
-     * <p> While this class is-a Runnable, it should never be dispatched in it's own thread. It is a runnable only so that the calling thread can use {@link
+     * <p> This class is-a Runnable, but it should never be dispatched in it's own thread. It is a runnable only so that the calling thread can use {@link
      * ContextHandler#handle(Runnable)} to setup classloaders etc. </p>
      */
     @Override
     public void run()
     {
-        if (!_contentProducer.hasRawContent())
+        Content content;
+        Throwable error;
+        try
         {
-            if (LOG.isDebugEnabled())
-                LOG.debug("running has no raw content; error: {}, EOF = {}", _error, _eof);
-            if (_error != null || _eof.isEarly())
-            {
-                // TODO is this necessary to add here?
-                _channelState.getHttpChannel().getResponse().getHttpFields().add(HttpConnection.CONNECTION_CLOSE);
-                if (_error != null)
-                    _readListener.onError(_error);
-                else
-                    _readListener.onError(new EofException("Early EOF"));
-            }
-            else if (_eof.isEof())
-            {
-                try
-                {
-                    _readListener.onAllDataRead();
-                }
-                catch (Throwable x)
-                {
-                    if (LOG.isDebugEnabled())
-                        LOG.debug("running failed onAllDataRead", x);
-                    _readListener.onError(x);
-                }
-            }
-            // else: !hasContent() && !error && !EOF -> no-op
+            content = _contentProducer.nextNonEmptyContent(HttpChannelState.Mode.ASYNC);
+            error = (content instanceof ErrorContent) ? ((ErrorContent) content)._error : null;
         }
-        else
+        catch (IOException e)
         {
-            if (LOG.isDebugEnabled())
-                LOG.debug("running has raw content");
+            content = new ErrorContent(e);
+            _channelState.onContent(content);
+            error = e;
+        }
+
+        if (error == null)
+        {
             try
             {
-                _readListener.onDataAvailable();
+                if (content.hasContent())
+                {
+                    _readListener.onDataAvailable();
+                    content = _contentProducer.nextNonEmptyContent(HttpChannelState.Mode.POLL);
+                    error = (content instanceof ErrorContent) ? ((ErrorContent) content)._error : null;
+                }
+
+                // TODO not quiet right
+                if (content.isEof() && content != EOF_CONSUMED)
+                {
+                    _channelState.onContent(EOF_CONSUMED);
+                    _readListener.onAllDataRead();
+                }
             }
             catch (Throwable x)
             {
                 if (LOG.isDebugEnabled())
                     LOG.debug("running failed onDataAvailable", x);
-                _readListener.onError(x);
+                error = x;
             }
         }
-    }
 
-    private void failContent(Throwable failure)
-    {
-        if (LOG.isDebugEnabled())
-            LOG.debug("failContent {} - " + failure, _contentProducer);
-        _channelState.getHttpChannel().failContent(failure);
-    }
-
-    private enum Eof
-    {
-        NOT_YET(false, false, false),
-        EOF(true, false, false),
-        CONSUMED_EOF(true, true, false),
-        EARLY_EOF(true, false, true),
-        ;
-
-        private final boolean _eof;
-        private final boolean _consumed;
-        private final boolean _early;
-
-        Eof(boolean eof, boolean consumed, boolean early)
-        {
-            _eof = eof;
-            _consumed = consumed;
-            _early = early;
-        }
-
-        boolean isEof()
-        {
-            return _eof;
-        }
-
-        boolean isConsumed()
-        {
-            return _consumed;
-        }
-
-        boolean isEarly()
-        {
-            return _early;
-        }
+        if (error != null)
+            _readListener.onError(error);
     }
 
     // All methods of this class have to be synchronized because a HTTP2 reset can call consumeTransformedContent()
@@ -431,7 +374,6 @@ public class HttpInput extends ServletInputStream implements Runnable
         private Content _transformedContent;
         private long _rawContentArrived;
         private Interceptor _interceptor;
-        private Throwable _consumeFailure;
 
         void recycle()
         {
@@ -451,7 +393,6 @@ public class HttpInput extends ServletInputStream implements Runnable
                 if (_interceptor instanceof Destroyable)
                     ((Destroyable)_interceptor).destroy();
                 _interceptor = null;
-                _consumeFailure = null;
             }
         }
 
@@ -487,32 +428,31 @@ public class HttpInput extends ServletInputStream implements Runnable
             }
         }
 
-        void consumeTransformedContent(Consumer<Throwable> failRawContent, Throwable failure)
+        boolean consumeAll()
         {
             synchronized (this)
             {
-                if (LOG.isDebugEnabled())
-                    LOG.debug("{} consumeTransformedContent", this);
-                // start by depleting the current _transformedContent
-                if (_transformedContent != null)
+                try
                 {
-                    _transformedContent.skip(_transformedContent.remaining());
-                    if (_transformedContent != _rawContent)
-                        _transformedContent.failed(failure);
-                    _transformedContent = null;
+                    while (true)
+                    {
+                        Content content = nextNonEmptyContent(HttpChannelState.Mode.POLL);
+                        if (LOG.isDebugEnabled())
+                            LOG.debug("{} consumeAll {}", this, content);
+                        if (content == null)
+                            return false;
+                        if (content.hasContent())
+                            content.skip(content.remaining());
+                        else if (content.isEof())
+                            return true;
+                    }
                 }
-
-                // don't bother transforming content, directly deplete the raw one
-                if (_rawContent != null)
+                catch (IOException e)
                 {
-                    _rawContent.skip(_rawContent.remaining());
-                    _rawContent.failed(failure);
-                    _rawContent = null;
+                    if (LOG.isDebugEnabled())
+                        LOG.debug("!ConsumedAll", e);
+                    return false;
                 }
-
-                // fail whatever other content the producer may have
-                _consumeFailure = failure;
-                failRawContent.accept(failure);
             }
         }
 
@@ -538,8 +478,6 @@ public class HttpInput extends ServletInputStream implements Runnable
                                 _transformedContent.succeeded();
                             _rawContent.succeeded();
                             _rawContent = null;
-                            // TODO maybe we should insted do below to remember succeeded has been called?
-                            // if ( _rawContent!= EOF_CONTENT) _rawContent = _transformedContent = EOF_CONTENT
                         }
                         return _transformedContent;
                     }
@@ -704,27 +642,20 @@ public class HttpInput extends ServletInputStream implements Runnable
         }
     }
 
-    public static class EofContent extends Content
+    public static class LastContent extends Content
     {
         final Content _delegate;
-        final boolean _early;
 
-        public EofContent(Content content)
-        {
-            this(content, false);
-        }
-
-        public EofContent(Content content, boolean early)
+        public LastContent(Content content)
         {
             super(content._content);
             _delegate = content;
-            _early = early;
         }
 
         @Override
         public boolean isEof()
         {
-            return true;
+            return true; // TODO maybe not ???
         }
 
         @Override
@@ -743,13 +674,69 @@ public class HttpInput extends ServletInputStream implements Runnable
         public int get(byte[] buffer, int offset, int length) throws IOException
         {
             int len = super.get(buffer, offset, length);
-            if (len == 0)
-            {
-                if (_early)
-                    throw new IOException("EARLY EOF");
-                return -1;
-            }
-            return len;
+            return len > 0 ? len : -1;
+        }
+    }
+
+    public static class EofContent extends Content
+    {
+        public EofContent()
+        {
+            super(BufferUtil.EMPTY_BUFFER);
+        }
+
+        public EofContent(Content content, boolean early)
+        {
+            super(content._content);
+        }
+
+        @Override
+        public boolean isEof()
+        {
+            return true;
+        }
+
+        @Override
+        public int get(byte[] buffer, int offset, int length) throws IOException
+        {
+            return -1;
+        }
+    }
+
+    public static class ErrorContent extends Content
+    {
+        final Throwable _error;
+
+        public ErrorContent(Throwable error)
+        {
+            super(BufferUtil.EMPTY_BUFFER);
+            _error = error;
+        }
+
+        @Override
+        public boolean isEof()
+        {
+            return true;
+        }
+
+        @Override
+        public int get(byte[] buffer, int offset, int length) throws IOException
+        {
+            if (_error instanceof IOException)
+                throw (IOException)_error;
+            throw new IOException(_error);
+        }
+    }
+
+    /*
+     * Early EOF exception.  Don't make a static instance of this as the stack trace
+     * may contain useful info TODO check this assumption.
+     */
+    public static class EarlyEofErrorContent extends ErrorContent
+    {
+        public EarlyEofErrorContent()
+        {
+            super(new IOException("Early EOF"));
         }
     }
 }

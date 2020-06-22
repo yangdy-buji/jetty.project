@@ -7,6 +7,7 @@ BLOCKING:
 UNREADY:
 WOKEN:
 READY:
+EOF:
 
 
 [*] --> IDLE
@@ -27,4 +28,5 @@ PRODUCING --> BLOCKING : BLOCK
 PRODUCING --> UNREADY : ASYNC
 
 READY -up-> IDLE : return content
+READY --> EOF : return EOF or Error
 @enduml

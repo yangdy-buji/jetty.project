@@ -33,7 +33,6 @@ import org.eclipse.jetty.io.QuietException;
 import org.eclipse.jetty.server.handler.ContextHandler;
 import org.eclipse.jetty.server.handler.ContextHandler.Context;
 import org.eclipse.jetty.server.handler.ErrorHandler;
-import org.eclipse.jetty.util.BufferUtil;
 import org.eclipse.jetty.util.thread.Scheduler;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -114,9 +113,7 @@ public class HttpChannelState
         UNREADY,
         WOKEN,
         READY,
-        EOF,
-        EOF_EARLY,
-        EOF_CONSUMED
+        EOF
     }
 
     /*
@@ -129,8 +126,8 @@ public class HttpChannelState
         ASYNC  // Async content, scheduling callback if none
     } ;
 
-    static HttpInput.EofContent EOF = new HttpInput.EofContent(new HttpInput.Content(BufferUtil.EMPTY_BUFFER));
-    static HttpInput.EofContent EOF_EARLY = new HttpInput.EofContent(new HttpInput.Content(BufferUtil.EMPTY_BUFFER));
+    static HttpInput.EofContent EOF = new HttpInput.EofContent();
+    static HttpInput.EofContent EOF_CONSUMED = new HttpInput.EofContent();
 
     /*
      * The output committed state, which works together with {@link HttpOutput.State}
@@ -166,7 +163,7 @@ public class HttpChannelState
     private RequestState _requestState = RequestState.BLOCKING;
     private OutputState _outputState = OutputState.OPEN;
     private InputState _inputState = InputState.IDLE;
-    private Semaphore _semaphore = new Semaphore(0);
+    private final Semaphore _semaphore = new Semaphore(0);
     private HttpInput.Content _content;
 
     private boolean _initial = true;
@@ -225,7 +222,7 @@ public class HttpChannelState
         }
     }
 
-    public boolean onWakeup()
+    public boolean onContentProducable()
     {
         boolean woken = false;
         boolean release = false;
@@ -266,13 +263,13 @@ public class HttpChannelState
             {
                 case BLOCKING:
                     _inputState = InputState.READY;
-                    _content = early?EOF_EARLY:EOF;
+                    _content = early?new HttpInput.EarlyEofErrorContent():EOF;
                     release = true;
                     break;
 
                 case UNREADY:
                     _inputState = InputState.READY;
-                    _content = early?EOF_EARLY:EOF;
+                    _content = early?new HttpInput.EarlyEofErrorContent():EOF;
                     if (_state == State.WAITING)
                     {
                         _state = State.WOKEN;
@@ -283,11 +280,11 @@ public class HttpChannelState
                 case IDLE:
                 case PRODUCING:
                     _inputState = InputState.READY;
-                    _content = early?EOF_EARLY:EOF;
+                    _content = early?new HttpInput.EarlyEofErrorContent():EOF;
                     break;
 
                 case READY:
-                    _content = new HttpInput.EofContent(_content);
+                    _content = new HttpInput.EofContent(_content, early);
                     break;
 
                 default:
@@ -351,8 +348,6 @@ public class HttpChannelState
                 switch (_inputState)
                 {
                     case EOF:
-                    case EOF_EARLY:
-                    case EOF_CONSUMED:
                         return _content;
 
                     case IDLE:
@@ -660,8 +655,9 @@ public class HttpChannelState
                     case IDLE:
                     case READY:
                     case EOF:
-                    case EOF_EARLY:
-                        return Action.READ_CALLBACK;
+                        if (_content != EOF_CONSUMED)
+                            return Action.READ_CALLBACK;
+                        break;
 
                     default:
                         break;
@@ -826,7 +822,7 @@ public class HttpChannelState
         }
     }
 
-    protected void onTimeout()
+    protected void onAsyncTimeout()
     {
         final List<AsyncListener> listeners;
         AsyncContextEvent event;
@@ -943,7 +939,7 @@ public class HttpChannelState
         }
     }
 
-    protected void onError(Throwable th)
+    protected void onHandleException(Throwable th)
     {
         final AsyncContextEvent asyncEvent;
         final List<AsyncListener> asyncListeners;
@@ -1427,7 +1423,7 @@ public class HttpChannelState
      *
      * @return {@code true} if woken
      */
-    public boolean onReadEof()
+    public boolean onEofConsumed()
     {
         boolean woken = false;
         synchronized (this)
@@ -1435,11 +1431,10 @@ public class HttpChannelState
             if (LOG.isDebugEnabled())
                 LOG.debug("onEof {}", toStringLocked());
 
-            // Force read ready so onAllDataRead can be called
-            _inputState = InputState.EOF_CONSUMED;
-            if (_content == null || !_content.isEof())
-                _content = EOF_EARLY;
-            if (_state == State.WAITING)
+            if (_inputState != InputState.EOF)
+                throw new IllegalStateException();
+
+            if (_content != EOF_CONSUMED && _state == State.WAITING)
             {
                 woken = true;
                 _state = State.WOKEN;
