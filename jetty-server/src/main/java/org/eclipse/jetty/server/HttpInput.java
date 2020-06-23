@@ -262,7 +262,7 @@ public class HttpInput extends ServletInputStream implements Runnable
             }
         }
 
-        Content content = _contentProducer.nextNonEmptyContent(async? Mode.ASYNC: Mode.BLOCK);
+        Content content = _contentProducer.nextNonEmptyContent(async ? Mode.ASYNC : Mode.BLOCK);
         if (LOG.isDebugEnabled())
             LOG.debug("read content {}", content);
         if (content != null)
@@ -288,7 +288,7 @@ public class HttpInput extends ServletInputStream implements Runnable
                 LOG.debug("available = {}", content);
             return content == null ? 0 : content.remaining();
         }
-        catch(IOException e)
+        catch (IOException e)
         {
             LOG.debug("!available", e);
             return 0;
@@ -307,7 +307,7 @@ public class HttpInput extends ServletInputStream implements Runnable
         try
         {
             content = _contentProducer.nextNonEmptyContent(Mode.ASYNC);
-            error = (content instanceof ErrorContent) ? ((ErrorContent) content)._error : null;
+            error = (content instanceof ErrorContent) ? ((ErrorContent)content)._error : null;
         }
         catch (IOException e)
         {
@@ -324,11 +324,11 @@ public class HttpInput extends ServletInputStream implements Runnable
                 {
                     _readListener.onDataAvailable();
                     content = _contentProducer.nextNonEmptyContent(Mode.POLL);
-                    error = (content instanceof ErrorContent) ? ((ErrorContent) content)._error : null;
+                    error = (content instanceof ErrorContent) ? ((ErrorContent)content)._error : null;
                 }
 
                 // TODO not quiet right
-                if (content.isLast() && content != EOF_COMPLETE)
+                if (content != null && content.isLast() && content != EOF_COMPLETE)
                 {
                     _channelState.onContent(EOF_COMPLETE);
                     _readListener.onAllDataRead();
@@ -483,7 +483,7 @@ public class HttpInput extends ServletInputStream implements Runnable
 
                     if (_rawContent == null)
                     {
-                        switch(mode)
+                        switch (mode)
                         {
                             case POLL:
                             case ASYNC:

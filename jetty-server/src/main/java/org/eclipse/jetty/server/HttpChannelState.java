@@ -149,7 +149,7 @@ public class HttpChannelState
         BLOCK, // Block for content
         POLL,  // Poll for content, returning null if none
         ASYNC  // Async content, scheduling callback if none
-    } ;
+    }
 
     static final HttpInput.Content EMPTY = new HttpInput.Content(BufferUtil.EMPTY_BUFFER)
     {
@@ -306,6 +306,9 @@ public class HttpChannelState
                 LOG.debug("onContentProducable {}", this);
             switch (_inputState)
             {
+                case IDLE:
+                    break;
+
                 case BLOCKING:
                     _inputState = InputState.IDLE;
                     release = true;
@@ -321,7 +324,7 @@ public class HttpChannelState
                     break;
 
                 default:
-                    throw new IllegalStateException();
+                    throw new IllegalStateException(toStringLocked());
             }
         }
 
@@ -343,13 +346,13 @@ public class HttpChannelState
             {
                 case BLOCKING:
                     _inputState = InputState.CONTENT;
-                    _content = early?new HttpInput.EarlyEofErrorContent():EOF;
+                    _content = early ? new HttpInput.EarlyEofErrorContent() : EOF;
                     release = true;
                     break;
 
                 case UNREADY:
                     _inputState = InputState.READY;
-                    _content = early?new HttpInput.EarlyEofErrorContent():EOF;
+                    _content = early ? new HttpInput.EarlyEofErrorContent() : EOF;
                     if (_state == State.WAITING)
                     {
                         _state = State.WOKEN;
@@ -360,7 +363,7 @@ public class HttpChannelState
                 case IDLE:
                 case PRODUCING:
                     _inputState = InputState.CONTENT;
-                    _content = early?new HttpInput.EarlyEofErrorContent():EOF;
+                    _content = early ? new HttpInput.EarlyEofErrorContent() : EOF;
                     break;
 
                 case CONTENT:
@@ -426,7 +429,7 @@ public class HttpChannelState
                     if (!(content instanceof HttpInput.ErrorContent))
                         throw new IllegalStateException();
 
-                    HttpInput.ErrorContent errorContent = (HttpInput.ErrorContent) content;
+                    HttpInput.ErrorContent errorContent = (HttpInput.ErrorContent)content;
                     if (_content instanceof HttpInput.ErrorContent)
                     {
                         HttpInput.ErrorContent existingErrorContent = ((HttpInput.ErrorContent)_content);
@@ -780,7 +783,7 @@ public class HttpChannelState
                 return Action.COMPLETE;
 
             case ASYNC:
-                switch(_inputState)
+                switch (_inputState)
                 {
                     case PRODUCABLE:
                         _inputState = InputState.IDLE;

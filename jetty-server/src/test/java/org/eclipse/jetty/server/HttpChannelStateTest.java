@@ -140,7 +140,9 @@ public class HttpChannelStateTest
             public void produceContent()
             {
                 HttpInput.Content content = _queue.poll();
-                if (content != null)
+                if (content == HttpChannelState.EOF)
+                    _state.onEof(false);
+                else if (content != null)
                     _state.onContent(content);
             }
 
@@ -151,6 +153,8 @@ public class HttpChannelStateTest
             }
         };
         _state = _channel.getState();
+        _queue.clear();
+        _needy.set(false);
     }
 
     @AfterEach
@@ -222,7 +226,7 @@ public class HttpChannelStateTest
         // Provide last content
         HttpInput.Content contentLast =  new HttpInput.Content(BufferUtil.toBuffer("World"));
         _queue.add(contentLast);
-        _queue.add(EOF);
+        _queue.add(HttpChannelState.EOF);
 
         // Get last content
         contentOut = _state.nextContent(Mode.BLOCK);
@@ -307,7 +311,6 @@ public class HttpChannelStateTest
         assertThat(_state.unhandle(), is(HttpChannelState.Action.COMPLETE));
     }
 
-
     @Test
     public void testAsyncReadH1Sequence() throws Exception
     {
@@ -360,23 +363,102 @@ public class HttpChannelStateTest
         contentOut = _state.nextContent(Mode.ASYNC);
         assertEquals(contentIn, contentOut);
 
+        // Try to consume more content
+        contentOut = _state.nextContent(Mode.ASYNC);
+        assertNull(contentOut);
+        assertTrue(_needy.compareAndSet(true, false));
+
         // last content arrives before isReady processing
         HttpInput.Content contentLast =  new HttpInput.Content(BufferUtil.toBuffer("World"));
         _queue.add(contentLast);
-        _queue.add(EOF);
+        _queue.add(HttpChannelState.EOF);
+        assertFalse(_state.onContentProducable());
 
-        System.err.println(_state);
-        // We get the last content
+        // unhandle goes directly to read callback
+        assertThat(_state.unhandle(), is(HttpChannelState.Action.READ_CALLBACK));
         contentOut = _state.nextContent(Mode.ASYNC);
         assertEquals(contentLast, contentOut);
 
-        System.err.println(_state);
         // We get the EOF
         contentOut = _state.nextContent(Mode.ASYNC);
         assertEquals(HttpChannelState.EOF, contentOut);
-
-
-
+        assertFalse(_state.onEofConsumed());
     }
 
+    @Test
+    public void testAsyncReadH2Sequence() throws Exception
+    {
+        // Add some initial content
+        HttpInput.Content contentIn =  new HttpInput.Content(BufferUtil.toBuffer("Hello"));
+        assertFalse(_state.onContent(contentIn));
+
+        // Do the dispatch and start async
+        assertThat(_state.handling(), is(HttpChannelState.Action.DISPATCH));
+        _state.startAsync(null);
+
+        // Initial content should be available and no need to wakeup
+        HttpInput.Content contentOut = _state.nextContent(Mode.ASYNC);
+        assertEquals(contentIn, contentOut);
+        assertFalse(_state.onReadReady());
+
+        // do the onDataAvailable call
+        assertThat(_state.unhandle(), is(HttpChannelState.Action.READ_CALLBACK));
+        contentOut = _state.nextContent(Mode.ASYNC);
+        assertEquals(HttpChannelState.EMPTY, contentOut);
+
+        // Try to consume more content
+        contentOut = _state.nextContent(Mode.ASYNC);
+        assertNull(contentOut);
+        assertTrue(_needy.compareAndSet(true, false));
+
+        // Now we wait for content
+        assertThat(_state.unhandle(), is(HttpChannelState.Action.WAIT));
+
+        // Content arrives while waiting
+        assertTrue(_state.onContent(contentIn));
+
+        // do the handling call
+        assertThat(_state.handling(), is(HttpChannelState.Action.READ_CALLBACK));
+        contentOut = _state.nextContent(Mode.ASYNC);
+        assertEquals(contentIn, contentOut);
+
+        // Try to consume more content
+        contentOut = _state.nextContent(Mode.ASYNC);
+        assertNull(contentOut);
+        assertTrue(_needy.compareAndSet(true, false));
+
+        // More content arrives before we unhandle
+        assertFalse(_state.onContent(contentIn));
+
+        // unhandle goes directly to read callback
+        assertThat(_state.unhandle(), is(HttpChannelState.Action.READ_CALLBACK));
+        contentOut = _state.nextContent(Mode.ASYNC);
+        assertEquals(contentIn, contentOut);
+
+        // Try to consume more content
+        contentOut = _state.nextContent(Mode.ASYNC);
+        assertNull(contentOut);
+        assertTrue(_needy.compareAndSet(true, false));
+
+        // last content arrives before isReady processing
+        HttpInput.Content contentLast =  new HttpInput.Content(BufferUtil.toBuffer("World"))
+        {
+            @Override
+            public boolean isLast()
+            {
+                return true;
+            }
+        };
+        assertFalse(_state.onContent(contentLast));
+
+        // unhandle goes directly to read callback
+        assertThat(_state.unhandle(), is(HttpChannelState.Action.READ_CALLBACK));
+        contentOut = _state.nextContent(Mode.ASYNC);
+        assertEquals(contentLast, contentOut);
+
+        // We get the EOF
+        contentOut = _state.nextContent(Mode.ASYNC);
+        assertEquals(HttpChannelState.EOF, contentOut);
+        assertFalse(_state.onEofConsumed());
+    }
 }
