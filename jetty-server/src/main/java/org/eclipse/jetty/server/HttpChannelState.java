@@ -113,8 +113,9 @@ public class HttpChannelState
         IDLE,        // No isReady; No data
         PRODUCING,
         BLOCKING,
+        CONTENT,
         UNREADY,
-        WOKEN,
+        PRODUCABLE,
         READY,
         EOF
     }
@@ -279,7 +280,7 @@ public class HttpChannelState
             switch (_inputState)
             {
                 case BLOCKING:
-                    _inputState = InputState.READY;
+                    _inputState = InputState.CONTENT;
                     _content = early?new HttpInput.EarlyEofErrorContent():EOF;
                     release = true;
                     break;
@@ -296,10 +297,11 @@ public class HttpChannelState
 
                 case IDLE:
                 case PRODUCING:
-                    _inputState = InputState.READY;
+                    _inputState = InputState.CONTENT;
                     _content = early?new HttpInput.EarlyEofErrorContent():EOF;
                     break;
 
+                case CONTENT:
                 case READY:
                     _content = new HttpInput.EofContent(_content, early);
                     break;
@@ -327,7 +329,7 @@ public class HttpChannelState
             switch (_inputState)
             {
                 case BLOCKING:
-                    _inputState = InputState.READY;
+                    _inputState = InputState.CONTENT;
                     _content = content;
                     release = true;
                     break;
@@ -343,9 +345,9 @@ public class HttpChannelState
                     break;
 
                 case IDLE:
-                case WOKEN:
+                case PRODUCABLE:
                 case PRODUCING:
-                    _inputState = InputState.READY;
+                    _inputState = InputState.CONTENT;
                     _content = content;
                     break;
 
@@ -357,6 +359,7 @@ public class HttpChannelState
                     _content = content;
                     break;
 
+                case CONTENT:
                 case READY:
                     if (!(content instanceof HttpInput.ErrorContent))
                         throw new IllegalStateException();
@@ -426,9 +429,10 @@ public class HttpChannelState
                         break;
 
                     case UNREADY:
-                    case WOKEN:
+                    case PRODUCABLE:
                         return null;
 
+                    case CONTENT:
                     case READY:
                         HttpInput.Content content = _content;
                         if (_content.isLast())
@@ -714,13 +718,13 @@ public class HttpChannelState
             case ASYNC:
                 switch (_inputState)
                 {
-                    case IDLE:
+                    case PRODUCABLE:
                     case READY:
+                        return Action.READ_CALLBACK;
                     case EOF:
                         if (_content != EOF_COMPLETE)
                             return Action.READ_CALLBACK;
                         break;
-
                     default:
                         break;
                 }

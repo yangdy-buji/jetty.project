@@ -37,7 +37,7 @@ HttpInput->ContentProducer: nextNon\nNullContent\n(BLOCK)
                                     Connection->HttpChannel: addContent
                                         HttpChannel->HttpChannelState: onContent
                                             note over HttpChannelState
-                                            PRODUCING->READY
+                                            PRODUCING->CONTENT
                                             remember content
                                             end note
                                         return
@@ -52,7 +52,7 @@ HttpInput->ContentProducer: nextNon\nNullContent\n(BLOCK)
                                         Connection->HttpChannel: onData
                                             HttpChannel->HttpChannelState: onContent
                                                 note over HttpChannelState
-                                                PRODUCING->READY
+                                                PRODUCING->CONTENT
                                                 remember content
                                                 end note
                                             return
@@ -97,7 +97,7 @@ HttpInput->ContentProducer: nextNon\nNullContent\n(BLOCK)
                         else HTTP1
                             Connection->HttpChannel: onFillable
                             activate Connection
-                                HttpChannel->HttpChannelState: onWakeup
+                                HttpChannel->HttpChannelState: onContentProducable
                                     note over HttpChannelState
                                     BLOCKING->IDLE
                                     end note
@@ -112,7 +112,7 @@ HttpInput->ContentProducer: nextNon\nNullContent\n(BLOCK)
                             activate Connection
                                 HttpChannel->HttpChannelState: onContent
                                         note over HttpChannelState
-                                        BLOCKING->READY
+                                        BLOCKING->CONTENT
                                         remember content
                                         end note
                                         HttpChannelState->Semaphore:release
@@ -123,9 +123,9 @@ HttpInput->ContentProducer: nextNon\nNullContent\n(BLOCK)
                         end
                     return
                 ...
-                else READY
+                else CONTENT || READY
                         note over HttpChannelState
-                        READY->IDLE
+                        CONTENT||READY->IDLE
                         end note
                     return content
                 end
@@ -160,9 +160,9 @@ HttpInput->ContentProducer: nextNon\nNullContent\n(POLL)
                     HttpChannelState-->ContentProducer: null
                     autoactivate on
                     ...
-                else READY
+                else CONTENT||READY
                     note over HttpChannelState
-                    READY->IDLE
+                    CONTENT||READY->IDLE
                     end note
                     autoactivate off
                     HttpChannelState->ContentProducer: content
@@ -215,9 +215,9 @@ newpage
     loop
         HttpChannel->HttpChannelState: nextAction
         alt inputState
-        else WOKEN
+        else PRODUCABLE
             note over HttpChannelState
-                WOKEN->IDLE
+                PRODUCABLE->IDLE
             end note
             autoactivate off
             HttpChannelState-->HttpChannel: ASYNC_READ
@@ -282,9 +282,9 @@ HttpInput->ContentProducer: nextNon\nNullContent\n(ASYNC)
                         end note
                     return
                     ...
-                else READY
+                else CONTENT||READY
                     note over HttpChannelState
-                    READY->IDLE
+                    CONTENT||READY->IDLE
                     end note
                     autoactivate off
                     HttpChannelState->ContentProducer: content
@@ -324,7 +324,7 @@ alt if content arrives
     else HTTP1
         Connection->HttpChannel: onFillable
         activate Connection
-            HttpChannel->HttpChannelState: onWakeup
+            HttpChannel->HttpChannelState: onContentProducable
                 alt inputState
                 else BLOCKING
                     note over HttpChannelState
@@ -336,7 +336,7 @@ alt if content arrives
                     ...
                 else UNREADY
                     note over HttpChannelState
-                    UNREADY->WOKEN
+                    UNREADY->PRODUCABLE
                     woken=WAITING
                     end note
                     ...
@@ -356,7 +356,7 @@ alt if content arrives
                 alt inputState
                 else BLOCKING
                     note over HttpChannelState
-                    BLOCKING->READY
+                    BLOCKING->CONTENT
                     remember content
                     woken=false
                     end note
@@ -370,13 +370,13 @@ alt if content arrives
                     woken=WAITING
                     end note
                     ...
-                else READY
+                else CONTENT||READY
                     note over HttpChannelState
                     IllegalStateException
                     end note
                 else default
                     note over HttpChannelState
-                    ->READY
+                    ->CONTENT
                     remember content
                     woken=false
                     end note
