@@ -28,6 +28,7 @@ import javax.servlet.ServletInputStream;
 
 import org.eclipse.jetty.http.BadMessageException;
 import org.eclipse.jetty.http.HttpStatus;
+import org.eclipse.jetty.io.EofException;
 import org.eclipse.jetty.server.handler.ContextHandler;
 import org.eclipse.jetty.util.BufferUtil;
 import org.eclipse.jetty.util.Callback;
@@ -173,15 +174,16 @@ public class HttpInput extends ServletInputStream implements Runnable
     @Override
     public boolean isFinished()
     {
-        // TODO review the need for this method
         try
         {
-            Content content = _channelState.nextContent(HttpChannelState.Mode.POLL);
+            Content content = _contentProducer.nextNonEmptyContent(HttpChannelState.Mode.POLL);
+            if (LOG.isDebugEnabled())
+                LOG.debug("isFinished {} {}", content, this);
             return content != null && content.isEmpty() && content.isLast();
         }
-        catch (InterruptedException e)
+        catch (IOException e)
         {
-            return false;
+            return true;
         }
     }
 
@@ -626,7 +628,7 @@ public class HttpInput extends ServletInputStream implements Runnable
         @Override
         public String toString()
         {
-            return String.format("Content@%x{%s}", hashCode(), BufferUtil.toDetailString(_content));
+            return String.format("%s@%x{%s}", getClass().getSimpleName(), hashCode(), BufferUtil.toDetailString(_content));
         }
     }
 
@@ -732,7 +734,7 @@ public class HttpInput extends ServletInputStream implements Runnable
     {
         public EarlyEofErrorContent()
         {
-            super(new IOException("Early EOF"));
+            super(new EofException("Early EOF"));
         }
     }
 }

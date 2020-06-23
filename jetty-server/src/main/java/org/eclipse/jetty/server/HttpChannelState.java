@@ -102,11 +102,31 @@ public class HttpChannelState
         COMPLETED    // Response is completed
     }
 
-    /**
+    /*
      * The input readiness state.
      * The input state is kept in HttpChannelState rather than in {@link HttpInput} to avoid deadlock,
      * as HttpInput sometimes needs to check for {@link State#WAITING} and {@link #nextAction(boolean)}
-     * needs to check the InputState.
+     * needs to check the InputState.*
+     *
+     *         +------->IDLE<-------+
+     *        /        //^ ^         \
+     *       /+-------+/ |  \         \
+     *      //        /  |   \         \
+     *     //        V   |    \         \
+     *    // PRODUCING---+   PRODUCABLE  +
+     *   ++ /   |        ^      ^        |
+     *   |||    |        |      |        |
+     *   |||    V        |      |        |
+     *   ||| BLOCKING----+   UNREADY     +
+     *   +++    |               |       /
+     *    \\\   |               |      /
+     *     \VV  V               V     /
+     *       CONTENT         READY---+
+     *              \       /
+     *               \     /
+     *                V   V
+     *                 EOF
+     *
      */
     enum InputState
     {
@@ -130,8 +150,22 @@ public class HttpChannelState
         ASYNC  // Async content, scheduling callback if none
     } ;
 
-    static HttpInput.EofContent EOF = new HttpInput.EofContent();
-    static HttpInput.EofContent EOF_COMPLETE = new HttpInput.EofContent();
+    static final HttpInput.EofContent EOF = new HttpInput.EofContent()
+    {
+        @Override
+        public String toString()
+        {
+            return "EOF";
+        }
+    };
+    static final HttpInput.EofContent EOF_COMPLETE = new HttpInput.EofContent()
+    {
+        @Override
+        public String toString()
+        {
+            return "EOF_COMPLETE";
+        }
+    };
 
     /*
      * The output committed state, which works together with {@link HttpOutput.State}
@@ -423,6 +457,7 @@ public class HttpChannelState
                                 _inputState = InputState.IDLE;
                                 return null;
                             case ASYNC:
+                                _inputState = InputState.UNREADY;
                                 need = true;
                                 break;
                         }
@@ -716,18 +751,8 @@ public class HttpChannelState
                 return Action.COMPLETE;
 
             case ASYNC:
-                switch (_inputState)
-                {
-                    case PRODUCABLE:
-                    case READY:
-                        return Action.READ_CALLBACK;
-                    case EOF:
-                        if (_content != EOF_COMPLETE)
-                            return Action.READ_CALLBACK;
-                        break;
-                    default:
-                        break;
-                }
+                if (_inputState == InputState.READY)
+                    return Action.READ_CALLBACK;
 
                 if (_asyncWritePossible)
                 {

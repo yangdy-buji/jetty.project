@@ -231,7 +231,6 @@ public class HttpChannelStateTest
         assertThat(_state.unhandle(), is(HttpChannelState.Action.COMPLETE));
     }
 
-
     @Test
     public void testBlockingReadH2Sequence() throws Exception
     {

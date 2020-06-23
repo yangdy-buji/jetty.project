@@ -11,11 +11,6 @@ participant Application as "\nApplication\n"
 
 autoactivate on
 
-note over HttpChannelState
-The nextContent method is shown on HttpChannelState. This has only
-been done for clarity of the diagram and the actual method would
-most likely be in ContentProducer
-end note
 == Blocking Read ==
 
 Application->HttpInput: read

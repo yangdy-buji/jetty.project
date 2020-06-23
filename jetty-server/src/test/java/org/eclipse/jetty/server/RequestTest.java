@@ -2096,6 +2096,7 @@ public class RequestTest
             }
             catch (Exception e)
             {
+                e.printStackTrace();
                 response.sendError(500);
             }
         }
