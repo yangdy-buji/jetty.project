@@ -338,7 +338,7 @@ public class HttpConnection extends AbstractConnection implements Runnable, Http
             // The parser is going generate and forward contents to the HttpInput
             // so it's up to it to fail them individually.
             boolean handle = parseRequestBuffer();
-            if (handle || filled <= 0 )
+            if (handle || filled <= 0)
                 break;
             filled = fillRequestBuffer();
         }
