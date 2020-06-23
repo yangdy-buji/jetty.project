@@ -317,6 +317,8 @@ public class HttpChannelOverHttp extends HttpChannel implements HttpParser.Reque
     @Override
     public void produceContent()
     {
+        if (LOG.isDebugEnabled())
+            LOG.debug("produceContent {}", this);
         _httpConnection.parseAndFillForContent();
     }
 

@@ -432,6 +432,9 @@ public class HttpInput extends ServletInputStream implements Runnable
         {
             while (true)
             {
+                if (LOG.isDebugEnabled())
+                    LOG.debug("nextNonEmptyContent rc={} tc={}", _rawContent, _transformedContent);
+
                 // Use any unconsumed transformed content
                 if (_transformedContent != null)
                 {
@@ -462,7 +465,7 @@ public class HttpInput extends ServletInputStream implements Runnable
                 // Use any unconsumed raw content
                 if (_rawContent != null)
                 {
-                    if (_rawContent.hasContent())
+                    if (_rawContent.hasContent() || _rawContent.isLast())
                     {
                         _transformedContent = _interceptor == null ? _rawContent : _interceptor.readFrom(_rawContent);
                         continue;
@@ -474,10 +477,22 @@ public class HttpInput extends ServletInputStream implements Runnable
                 try
                 {
                     _rawContent = _channelState.nextContent(mode);
+
+                    if (_rawContent == null)
+                    {
+                        switch(mode)
+                        {
+                            case POLL:
+                            case ASYNC:
+                                return null;
+
+                            default:
+                                break;
+                        }
+                    }
                 }
                 catch (InterruptedException e)
                 {
-                    // TODO what to do here?
                     throw new InterruptedIOException()
                     {
                         {

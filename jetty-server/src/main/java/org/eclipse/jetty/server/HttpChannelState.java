@@ -108,7 +108,7 @@ public class HttpChannelState
      * as HttpInput sometimes needs to check for {@link State#WAITING} and {@link #nextAction(boolean)}
      * needs to check the InputState.
      */
-    private enum InputState
+    enum InputState
     {
         IDLE,        // No isReady; No data
         PRODUCING,
@@ -188,6 +188,14 @@ public class HttpChannelState
         }
     }
 
+    public InputState getInputState()
+    {
+        synchronized (this)
+        {
+            return _inputState;
+        }
+    }
+
     public void addListener(AsyncListener listener)
     {
         synchronized (this)
@@ -231,6 +239,8 @@ public class HttpChannelState
         boolean release = false;
         synchronized (this)
         {
+            if (LOG.isDebugEnabled())
+                LOG.debug("onContentProducable {}", this);
             switch (_inputState)
             {
                 case BLOCKING:
@@ -246,6 +256,7 @@ public class HttpChannelState
                         woken = true;
                     }
                     break;
+
                 default:
                     throw new IllegalStateException();
             }
@@ -262,6 +273,9 @@ public class HttpChannelState
         boolean release = false;
         synchronized (this)
         {
+            if (LOG.isDebugEnabled())
+                LOG.debug("onEof e={} {}", early, this);
+
             switch (_inputState)
             {
                 case BLOCKING:
@@ -307,6 +321,9 @@ public class HttpChannelState
         boolean release = false;
         synchronized (this)
         {
+            if (LOG.isDebugEnabled())
+                LOG.debug("onContent c={} {}", content, this);
+
             switch (_inputState)
             {
                 case BLOCKING:
@@ -372,17 +389,22 @@ public class HttpChannelState
     {
         while (true)
         {
+            boolean produce = false;
             boolean need = false;
             boolean acquire = false;
 
             synchronized (this)
             {
+                if (LOG.isDebugEnabled())
+                    LOG.debug("nextContent({}) {}", mode, this);
+
                 switch (_inputState)
                 {
                     case EOF:
                         return _content;
 
                     case IDLE:
+                        produce = true;
                         _inputState = InputState.PRODUCING;
                         break; // TODO more efficient to fall through here.
 
@@ -426,11 +448,17 @@ public class HttpChannelState
                         throw new IllegalStateException();
                 }
 
-                if (need)
-                    _channel.needContent(!acquire);
-                if (acquire)
-                    _semaphore.acquire();
+                if (LOG.isDebugEnabled())
+                    LOG.debug("nextContent({}) is={} p={} n={} a={}", mode, _inputState, produce, need, acquire);
             }
+
+
+            if (produce)
+                _channel.produceContent();
+            if (need)
+                _channel.needContent(!acquire);
+            if (acquire)
+                _semaphore.acquire();
         }
     }
 
@@ -1345,6 +1373,7 @@ public class HttpChannelState
         }
     }
 
+    //  TODO review name and usage
     public boolean isSuspended()
     {
         synchronized (this)
