@@ -29,6 +29,7 @@ import javax.servlet.ServletInputStream;
 import org.eclipse.jetty.http.BadMessageException;
 import org.eclipse.jetty.http.HttpStatus;
 import org.eclipse.jetty.io.EofException;
+import org.eclipse.jetty.server.HttpChannelState.Mode;
 import org.eclipse.jetty.server.handler.ContextHandler;
 import org.eclipse.jetty.util.BufferUtil;
 import org.eclipse.jetty.util.Callback;
@@ -176,7 +177,7 @@ public class HttpInput extends ServletInputStream implements Runnable
     {
         try
         {
-            Content content = _contentProducer.nextNonEmptyContent(HttpChannelState.Mode.POLL);
+            Content content = _contentProducer.nextNonEmptyContent(Mode.POLL);
             if (LOG.isDebugEnabled())
                 LOG.debug("isFinished {} {}", content, this);
             return content != null && content.isEmpty() && content.isLast();
@@ -192,9 +193,9 @@ public class HttpInput extends ServletInputStream implements Runnable
     {
         try
         {
-            Content content = _contentProducer.nextNonEmptyContent(HttpChannelState.Mode.ASYNC);
+            Content content = _contentProducer.nextNonEmptyContent(Mode.ASYNC);
             if (LOG.isDebugEnabled())
-                LOG.debug("isReady? {}", content);
+                LOG.debug("isReady? {} {}", content, this);
             return content != null;
         }
         catch (IOException e)
@@ -216,7 +217,7 @@ public class HttpInput extends ServletInputStream implements Runnable
             throw new IllegalStateException("Async not started");
         if (LOG.isDebugEnabled())
             LOG.debug("setReadListener l={} {}", readListener, this);
-        if (isReady())
+        if (isReady() && _channelState.onReadReady())
             scheduleReadListenerNotification();
     }
 
@@ -261,7 +262,7 @@ public class HttpInput extends ServletInputStream implements Runnable
             }
         }
 
-        Content content = _contentProducer.nextNonEmptyContent(async? HttpChannelState.Mode.ASYNC: HttpChannelState.Mode.BLOCK);
+        Content content = _contentProducer.nextNonEmptyContent(async? Mode.ASYNC: Mode.BLOCK);
         if (LOG.isDebugEnabled())
             LOG.debug("read content {}", content);
         if (content != null)
@@ -282,7 +283,7 @@ public class HttpInput extends ServletInputStream implements Runnable
     {
         try
         {
-            Content content = _contentProducer.nextNonEmptyContent(HttpChannelState.Mode.POLL);
+            Content content = _contentProducer.nextNonEmptyContent(Mode.POLL);
             if (LOG.isDebugEnabled())
                 LOG.debug("available = {}", content);
             return content == null ? 0 : content.remaining();
@@ -305,7 +306,7 @@ public class HttpInput extends ServletInputStream implements Runnable
         Throwable error;
         try
         {
-            content = _contentProducer.nextNonEmptyContent(HttpChannelState.Mode.ASYNC);
+            content = _contentProducer.nextNonEmptyContent(Mode.ASYNC);
             error = (content instanceof ErrorContent) ? ((ErrorContent) content)._error : null;
         }
         catch (IOException e)
@@ -322,7 +323,7 @@ public class HttpInput extends ServletInputStream implements Runnable
                 if (content.hasContent())
                 {
                     _readListener.onDataAvailable();
-                    content = _contentProducer.nextNonEmptyContent(HttpChannelState.Mode.POLL);
+                    content = _contentProducer.nextNonEmptyContent(Mode.POLL);
                     error = (content instanceof ErrorContent) ? ((ErrorContent) content)._error : null;
                 }
 
@@ -410,7 +411,7 @@ public class HttpInput extends ServletInputStream implements Runnable
                 {
                     while (true)
                     {
-                        Content content = nextNonEmptyContent(HttpChannelState.Mode.POLL);
+                        Content content = nextNonEmptyContent(Mode.POLL);
                         if (LOG.isDebugEnabled())
                             LOG.debug("{} consumeAll {}", this, content);
                         if (content == null)
@@ -430,7 +431,7 @@ public class HttpInput extends ServletInputStream implements Runnable
             }
         }
 
-        private Content nextNonEmptyContent(HttpChannelState.Mode mode) throws IOException
+        private Content nextNonEmptyContent(Mode mode) throws IOException
         {
             while (true)
             {
@@ -669,7 +670,7 @@ public class HttpInput extends ServletInputStream implements Runnable
     }
 
     /**
-     * StickyContents are kept in HttpChannelState even after a {@link HttpChannelState#nextContent(HttpChannelState.Mode)}
+     * StickyContents are kept in HttpChannelState even after a {@link HttpChannelState#nextContent(Mode)}
      * call. Used to remember EOF and Errors.
      */
     public interface StickyContent

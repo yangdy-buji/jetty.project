@@ -28,11 +28,13 @@ import java.util.Queue;
 import java.util.concurrent.Exchanger;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.eclipse.jetty.http.MetaData;
 import org.eclipse.jetty.io.AbstractEndPoint;
 import org.eclipse.jetty.io.ByteArrayEndPoint;
 import org.eclipse.jetty.server.HttpChannelState.InputState;
+import org.eclipse.jetty.server.HttpChannelState.Mode;
 import org.eclipse.jetty.server.HttpChannelState.State;
 import org.eclipse.jetty.util.BufferUtil;
 import org.eclipse.jetty.util.Callback;
@@ -46,6 +48,7 @@ import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.is;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 public class HttpChannelStateTest
@@ -73,6 +76,7 @@ public class HttpChannelStateTest
     private HttpChannel _channel;
     private HttpChannelState _state;
     private final Queue<HttpInput.Content> _queue = new LinkedList<>();
+    private final AtomicBoolean _needy = new AtomicBoolean();
 
     @BeforeEach
     public void init() throws Exception
@@ -127,6 +131,12 @@ public class HttpChannelStateTest
         })
         {
             @Override
+            public void needContent(boolean async)
+            {
+                _needy.set(true);
+            }
+
+            @Override
             public void produceContent()
             {
                 HttpInput.Content content = _queue.poll();
@@ -169,11 +179,15 @@ public class HttpChannelStateTest
     @Test
     public void testBlockingReadH1Sequence() throws Exception
     {
+        // Add some initial content before dispatch
         HttpInput.Content contentIn =  new HttpInput.Content(BufferUtil.toBuffer("Hello"));
         assertFalse(_state.onContent(contentIn));
 
+        // do the dispatch
         assertThat(_state.handling(), is(HttpChannelState.Action.DISPATCH));
-        HttpInput.Content contentOut = _state.nextContent(HttpChannelState.Mode.BLOCK);
+
+        // content should be available
+        HttpInput.Content contentOut = _state.nextContent(Mode.BLOCK);
         assertEquals(contentIn, contentOut);
 
         // Block for content in another thread.
@@ -183,7 +197,7 @@ public class HttpChannelStateTest
             try
             {
                 content.exchange(null);
-                content.exchange(_state.nextContent(HttpChannelState.Mode.BLOCK), 10, TimeUnit.SECONDS);
+                content.exchange(_state.nextContent(Mode.BLOCK), 10, TimeUnit.SECONDS);
             }
             catch (InterruptedException | TimeoutException e)
             {
@@ -206,26 +220,20 @@ public class HttpChannelStateTest
         assertEquals(contentIn, contentOut);
 
         // Provide last content
-        HttpInput.Content contentLast =  new HttpInput.Content(BufferUtil.toBuffer("World"))
-        {
-            @Override
-            public boolean isLast()
-            {
-                return true;
-            }
-        };
+        HttpInput.Content contentLast =  new HttpInput.Content(BufferUtil.toBuffer("World"));
         _queue.add(contentLast);
+        _queue.add(EOF);
 
         // Get last content
-        contentOut = _state.nextContent(HttpChannelState.Mode.BLOCK);
+        contentOut = _state.nextContent(Mode.BLOCK);
         assertEquals(contentLast, contentOut);
 
         // Get EOF
-        contentOut = _state.nextContent(HttpChannelState.Mode.BLOCK);
+        contentOut = _state.nextContent(Mode.BLOCK);
         assertEquals(HttpChannelState.EOF, contentOut);
 
         // Still EOF
-        contentOut = _state.nextContent(HttpChannelState.Mode.BLOCK);
+        contentOut = _state.nextContent(Mode.BLOCK);
         assertEquals(HttpChannelState.EOF, contentOut);
 
         assertThat(_state.unhandle(), is(HttpChannelState.Action.COMPLETE));
@@ -234,11 +242,15 @@ public class HttpChannelStateTest
     @Test
     public void testBlockingReadH2Sequence() throws Exception
     {
+        // Add some initial content before dispatch
         HttpInput.Content contentIn =  new HttpInput.Content(BufferUtil.toBuffer("Hello"));
         assertFalse(_state.onContent(contentIn));
 
+        // Do the dispatch
         assertThat(_state.handling(), is(HttpChannelState.Action.DISPATCH));
-        HttpInput.Content contentOut = _state.nextContent(HttpChannelState.Mode.BLOCK);
+
+        // Content should be available
+        HttpInput.Content contentOut = _state.nextContent(Mode.BLOCK);
         assertEquals(contentIn, contentOut);
 
         // Block for content in another thread.
@@ -248,7 +260,7 @@ public class HttpChannelStateTest
             try
             {
                 content.exchange(null);
-                content.exchange(_state.nextContent(HttpChannelState.Mode.BLOCK), 10, TimeUnit.SECONDS);
+                content.exchange(_state.nextContent(Mode.BLOCK), 10, TimeUnit.SECONDS);
             }
             catch (InterruptedException | TimeoutException e)
             {
@@ -281,19 +293,90 @@ public class HttpChannelStateTest
         assertFalse(_state.onContent(contentLast));
 
         // Get last content
-        contentOut = _state.nextContent(HttpChannelState.Mode.BLOCK);
+        contentOut = _state.nextContent(Mode.BLOCK);
         assertEquals(contentLast, contentOut);
 
         // Get EOF
-        contentOut = _state.nextContent(HttpChannelState.Mode.BLOCK);
+        contentOut = _state.nextContent(Mode.BLOCK);
         assertEquals(HttpChannelState.EOF, contentOut);
 
         // Still EOF
-        contentOut = _state.nextContent(HttpChannelState.Mode.BLOCK);
+        contentOut = _state.nextContent(Mode.BLOCK);
         assertEquals(HttpChannelState.EOF, contentOut);
 
         assertThat(_state.unhandle(), is(HttpChannelState.Action.COMPLETE));
     }
 
+
+    @Test
+    public void testAsyncReadH1Sequence() throws Exception
+    {
+        // Add some initial content
+        HttpInput.Content contentIn =  new HttpInput.Content(BufferUtil.toBuffer("Hello"));
+        assertFalse(_state.onContent(contentIn));
+
+        // Do the dispatch and start async
+        assertThat(_state.handling(), is(HttpChannelState.Action.DISPATCH));
+        _state.startAsync(null);
+
+        // Initial content should be available and no need to wakeup
+        HttpInput.Content contentOut = _state.nextContent(Mode.ASYNC);
+        assertEquals(contentIn, contentOut);
+        assertFalse(_state.onReadReady());
+
+        // do the onDataAvailable call
+        assertThat(_state.unhandle(), is(HttpChannelState.Action.READ_CALLBACK));
+        contentOut = _state.nextContent(Mode.ASYNC);
+        assertEquals(HttpChannelState.EMPTY, contentOut);
+
+        // Try to consume more content
+        contentOut = _state.nextContent(Mode.ASYNC);
+        assertNull(contentOut);
+        assertTrue(_needy.compareAndSet(true, false));
+
+        // Now we wait for content
+        assertThat(_state.unhandle(), is(HttpChannelState.Action.WAIT));
+
+        // Content arrives while waiting
+        _queue.add(contentIn);
+        assertTrue(_state.onContentProducable());
+
+        // do the handling call
+        assertThat(_state.handling(), is(HttpChannelState.Action.READ_CALLBACK));
+        contentOut = _state.nextContent(Mode.ASYNC);
+        assertEquals(contentIn, contentOut);
+
+        // Try to consume more content
+        contentOut = _state.nextContent(Mode.ASYNC);
+        assertNull(contentOut);
+        assertTrue(_needy.compareAndSet(true, false));
+
+        // More content arrives before we unhandle
+        _queue.add(contentIn);
+        assertFalse(_state.onContentProducable());
+
+        // unhandle goes directly to read callback
+        assertThat(_state.unhandle(), is(HttpChannelState.Action.READ_CALLBACK));
+        contentOut = _state.nextContent(Mode.ASYNC);
+        assertEquals(contentIn, contentOut);
+
+        // last content arrives before isReady processing
+        HttpInput.Content contentLast =  new HttpInput.Content(BufferUtil.toBuffer("World"));
+        _queue.add(contentLast);
+        _queue.add(EOF);
+
+        System.err.println(_state);
+        // We get the last content
+        contentOut = _state.nextContent(Mode.ASYNC);
+        assertEquals(contentLast, contentOut);
+
+        System.err.println(_state);
+        // We get the EOF
+        contentOut = _state.nextContent(Mode.ASYNC);
+        assertEquals(HttpChannelState.EOF, contentOut);
+
+
+
+    }
 
 }

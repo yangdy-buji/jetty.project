@@ -33,6 +33,7 @@ import org.eclipse.jetty.io.QuietException;
 import org.eclipse.jetty.server.handler.ContextHandler;
 import org.eclipse.jetty.server.handler.ContextHandler.Context;
 import org.eclipse.jetty.server.handler.ErrorHandler;
+import org.eclipse.jetty.util.BufferUtil;
 import org.eclipse.jetty.util.thread.Scheduler;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -150,6 +151,14 @@ public class HttpChannelState
         ASYNC  // Async content, scheduling callback if none
     } ;
 
+    static final HttpInput.Content EMPTY = new HttpInput.Content(BufferUtil.EMPTY_BUFFER)
+    {
+        @Override
+        public String toString()
+        {
+            return "EMPTY";
+        }
+    };
     static final HttpInput.EofContent EOF = new HttpInput.EofContent()
     {
         @Override
@@ -268,6 +277,25 @@ public class HttpChannelState
         }
     }
 
+    public boolean onReadReady()
+    {
+        synchronized (this)
+        {
+            if (LOG.isDebugEnabled())
+                LOG.debug("wake {}", this);
+            if (_inputState != InputState.READY)
+                _inputState = InputState.READY;
+            if (_content == null)
+                _content = EMPTY;
+            if (_state == State.WAITING)
+            {
+                _state = State.WOKEN;
+                return true;
+            }
+            return false;
+        }
+    }
+
     public boolean onContentProducable()
     {
         boolean woken = false;
@@ -284,7 +312,7 @@ public class HttpChannelState
                     break;
 
                 case UNREADY:
-                    _inputState = InputState.IDLE;
+                    _inputState = InputState.PRODUCABLE;
                     if (_state == State.WAITING)
                     {
                         _state = State.WOKEN;
@@ -544,11 +572,12 @@ public class HttpChannelState
 
     private String getStatusStringLocked()
     {
-        return String.format("s=%s rs=%s os=%s is=%s awp=%b se=%b i=%b al=%d",
+        return String.format("s=%s rs=%s os=%s is=%s c=%s awp=%b se=%b i=%b al=%d",
             _state,
             _requestState,
             _outputState,
             _inputState,
+            _content,
             _asyncWritePossible,
             _sendError,
             _initial,
@@ -751,8 +780,16 @@ public class HttpChannelState
                 return Action.COMPLETE;
 
             case ASYNC:
-                if (_inputState == InputState.READY)
-                    return Action.READ_CALLBACK;
+                switch(_inputState)
+                {
+                    case PRODUCABLE:
+                        _inputState = InputState.IDLE;
+                        return Action.READ_CALLBACK;
+                    case READY:
+                        return Action.READ_CALLBACK;
+                    default:
+                        break;
+                }
 
                 if (_asyncWritePossible)
                 {
@@ -761,7 +798,7 @@ public class HttpChannelState
                 }
 
                 Scheduler scheduler = _channel.getScheduler();
-                if (scheduler != null && _timeoutMs > 0 && !_event.hasTimeoutTask())
+                if (scheduler != null && _timeoutMs > 0 && _event != null && !_event.hasTimeoutTask())
                     _event.setTimeoutTask(scheduler.schedule(_event, _timeoutMs, TimeUnit.MILLISECONDS));
                 _state = State.WAITING;
                 return Action.WAIT;

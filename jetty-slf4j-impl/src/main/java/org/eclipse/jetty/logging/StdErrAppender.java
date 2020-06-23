@@ -35,6 +35,7 @@ public class StdErrAppender implements JettyAppender
     static final String THREAD_PADDING_KEY = "org.eclipse.jetty.logging.appender.THREAD_PADDING";
     static final String MESSAGE_ESCAPE_KEY = "org.eclipse.jetty.logging.appender.MESSAGE_ESCAPE";
     static final String ZONEID_KEY = "org.eclipse.jetty.logging.appender.ZONE_ID";
+    private final static String PADDING = "                                                                                ";
     private static final String EOL = System.lineSeparator();
 
     private final Timestamp timestamper;
@@ -143,14 +144,8 @@ public class StdErrAppender implements JettyAppender
 
         // Logger Name
         builder.append(':');
-        if (condensedNames)
-        {
-            builder.append(logger.getCondensedName());
-        }
-        else
-        {
-            builder.append(logger.getName());
-        }
+        String name = condensedNames ? logger.getCondensedName() : logger.getName();
+        builder.append(name);
 
         // Thread Name
         builder.append(':');
@@ -158,7 +153,7 @@ public class StdErrAppender implements JettyAppender
         builder.append(':');
 
         // Message
-        builder.append(' ');
+        builder.append(PADDING, 0, Math.max(1, 45 - name.length() - threadName.length()));
 
         FormattingTuple ft = MessageFormatter.arrayFormat(message, argumentArray);
         appendEscaped(builder, ft.getMessage());
