@@ -37,8 +37,6 @@ import org.eclipse.jetty.util.component.Destroyable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import static org.eclipse.jetty.server.HttpChannelState.EOF_COMPLETE;
-
 /**
  * <p> While this class is-a Runnable, it should never be dispatched in it's own thread. It is a runnable only so that the calling thread can use {@link
  * ContextHandler#handle(Runnable)} to setup classloaders etc. </p>
@@ -46,6 +44,17 @@ import static org.eclipse.jetty.server.HttpChannelState.EOF_COMPLETE;
 public class HttpInput extends ServletInputStream implements Runnable
 {
     private static final Logger LOG = LoggerFactory.getLogger(HttpInput.class);
+
+    static final Content EMPTY = new Content(BufferUtil.EMPTY_BUFFER)
+    {
+        @Override
+        public String toString()
+        {
+            return "EMPTY";
+        }
+    };
+    static final EofContent EOF = new EofContent("EOF");
+    static final EofContent EOF_COMPLETE = new EofContent("EOF_COMPLETE");
 
     private final byte[] _oneByteBuffer = new byte[1];
 
@@ -241,7 +250,7 @@ public class HttpInput extends ServletInputStream implements Runnable
     {
         boolean async = isAsync();
         if (LOG.isDebugEnabled())
-            LOG.debug("read async = {}", async);
+            LOG.debug("read({},{},{}){}", Long.toHexString(b.hashCode()), off, len, async ? " async" : "");
 
         // Calculate minimum request rate for DOS protection
         long minRequestDataRate = _channelState.getHttpChannel().getHttpConfiguration().getMinRequestDataRate();
@@ -327,7 +336,6 @@ public class HttpInput extends ServletInputStream implements Runnable
                     error = (content instanceof ErrorContent) ? ((ErrorContent)content)._error : null;
                 }
 
-                // TODO not quiet right
                 if (content != null && content.isLast() && content != EOF_COMPLETE)
                 {
                     _channelState.onContent(EOF_COMPLETE);
@@ -337,7 +345,7 @@ public class HttpInput extends ServletInputStream implements Runnable
             catch (Throwable x)
             {
                 if (LOG.isDebugEnabled())
-                    LOG.debug("running failed onDataAvailable", x);
+                    LOG.debug("running ", x);
                 error = x;
             }
         }
@@ -571,7 +579,6 @@ public class HttpInput extends ServletInputStream implements Runnable
         Content readFrom(Content content) throws IOException;
     }
 
-    // TODO should Content be an interface and optinally a Callback?
     public static class Content implements Callback
     {
         protected final ByteBuffer _content;
@@ -579,6 +586,11 @@ public class HttpInput extends ServletInputStream implements Runnable
         public Content(ByteBuffer content)
         {
             _content = content;
+        }
+
+        public Content(String content)
+        {
+            _content = BufferUtil.toBuffer(content);
         }
 
         public boolean isLast()
@@ -643,22 +655,30 @@ public class HttpInput extends ServletInputStream implements Runnable
             _delegate = content;
         }
 
+        public LastContent(ByteBuffer content)
+        {
+            super(content);
+            _delegate = null;
+        }
+
         @Override
         public boolean isLast()
         {
-            return true; // TODO maybe not ???
+            return true;
         }
 
         @Override
         public void succeeded()
         {
-            _delegate.succeeded();
+            if (_delegate != null)
+                _delegate.succeeded();
         }
 
         @Override
         public void failed(Throwable x)
         {
-            _delegate.failed(x);
+            if (_delegate != null)
+                _delegate.failed(x);
         }
 
         @Override
@@ -677,16 +697,14 @@ public class HttpInput extends ServletInputStream implements Runnable
     {
     }
 
-    public static class EofContent extends Content implements StickyContent
+    static class EofContent extends Content implements StickyContent
     {
-        public EofContent()
+        private final String _name;
+
+        EofContent(String name)
         {
             super(BufferUtil.EMPTY_BUFFER);
-        }
-
-        public EofContent(Content content, boolean early)
-        {
-            super(content._content);
+            _name = name;
         }
 
         @Override
@@ -699,6 +717,12 @@ public class HttpInput extends ServletInputStream implements Runnable
         public int get(byte[] buffer, int offset, int length)
         {
             return -1;
+        }
+
+        @Override
+        public String toString()
+        {
+            return String.format("%s@%x", _name, hashCode());
         }
     }
 

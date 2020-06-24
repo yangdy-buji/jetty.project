@@ -800,6 +800,7 @@ public class AsyncServletIOTest
     @Test
     public void testStolenAsyncRead() throws Exception
     {
+        // TODO check why this is taking 10s?
         StringBuilder request = new StringBuilder(512);
         request.append("POST /ctx/stolen/info HTTP/1.1\r\n")
             .append("Host: localhost\r\n")
