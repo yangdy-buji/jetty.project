@@ -1553,12 +1553,11 @@ public class HttpChannelState
         synchronized (this)
         {
             if (LOG.isDebugEnabled())
-                LOG.debug("onEof {}", toStringLocked());
+                LOG.debug("onEofConsumed {}", toStringLocked());
 
-            if (_inputState != InputState.EOF)
-                throw new IllegalStateException();
-
-            if (_content != HttpInput.EOF_COMPLETE && _state == State.WAITING)
+            System.err.println(toStringLocked());
+            System.exit(1);
+            if (_state == State.WAITING)
             {
                 woken = true;
                 _state = State.WOKEN;

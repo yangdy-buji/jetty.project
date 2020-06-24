@@ -311,6 +311,8 @@ public class HttpInput extends ServletInputStream implements Runnable
     @Override
     public void run()
     {
+        if (LOG.isDebugEnabled())
+            LOG.debug("run {}", this);
         Content content;
         Throwable error;
         try
@@ -325,20 +327,23 @@ public class HttpInput extends ServletInputStream implements Runnable
             error = e;
         }
 
-        if (error == null)
+        if (content != null && error == null)
         {
             try
             {
                 if (content.hasContent())
                 {
+                    if (LOG.isDebugEnabled())
+                        LOG.debug("onDataAvailable {} {} ", content, this);
                     _readListener.onDataAvailable();
                     content = _contentProducer.nextNonEmptyContent(Mode.POLL);
                     error = (content instanceof ErrorContent) ? ((ErrorContent)content)._error : null;
                 }
-
-                if (content != null && content.isLast() && content != EOF_COMPLETE)
+                else if (content.isLast() && content != EOF_COMPLETE && !(content instanceof ErrorContent))
                 {
                     _channelState.onContent(EOF_COMPLETE);
+                    if (LOG.isDebugEnabled())
+                        LOG.debug("onAllDataRead {}", this);
                     _readListener.onAllDataRead();
                 }
             }
@@ -352,6 +357,12 @@ public class HttpInput extends ServletInputStream implements Runnable
 
         if (error != null)
             _readListener.onError(error);
+    }
+
+    @Override
+    public String toString()
+    {
+        return String.format("%s{%s}", super.toString(), _channelState);
     }
 
     // All methods of this class have to be synchronized because a HTTP2 reset can call consumeTransformedContent()
@@ -585,6 +596,7 @@ public class HttpInput extends ServletInputStream implements Runnable
 
         public Content(ByteBuffer content)
         {
+            Objects.requireNonNull(content);
             _content = content;
         }
 
