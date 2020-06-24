@@ -164,10 +164,12 @@ public class StdErrAppender implements JettyAppender
         // Thread Name
         builder.append(':');
         builder.append(threadName);
-        builder.append(":");
+        builder.append(':');
 
         // Padding
-        if (tagPadding != null)
+        if (tagPadding == null)
+            builder.append(' ');
+        else
         {
             int tagLen = name.length() + threadName.length() + 2;
             builder.append(tagPadding, 0, Math.max(1, tagPadding.length() - tagLen));
