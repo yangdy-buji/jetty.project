@@ -1555,8 +1555,6 @@ public class HttpChannelState
             if (LOG.isDebugEnabled())
                 LOG.debug("onEofConsumed {}", toStringLocked());
 
-            System.err.println(toStringLocked());
-            System.exit(1);
             if (_state == State.WAITING)
             {
                 woken = true;

@@ -187,9 +187,10 @@ public class HttpInput extends ServletInputStream implements Runnable
         try
         {
             Content content = _contentProducer.nextNonEmptyContent(Mode.POLL);
+            boolean finished = content != null && content.isEmpty() && content.isLast();
             if (LOG.isDebugEnabled())
-                LOG.debug("isFinished {} {}", content, this);
-            return content != null && content.isEmpty() && content.isLast();
+                LOG.debug("isFinished {} c={} {}", finished, content, this);
+            return finished;
         }
         catch (IOException e)
         {
@@ -273,7 +274,7 @@ public class HttpInput extends ServletInputStream implements Runnable
 
         Content content = _contentProducer.nextNonEmptyContent(async ? Mode.ASYNC : Mode.BLOCK);
         if (LOG.isDebugEnabled())
-            LOG.debug("read content {}", content);
+            LOG.debug("read c={}", content);
         if (content != null)
         {
             len = content.get(b, off, len);
@@ -455,7 +456,7 @@ public class HttpInput extends ServletInputStream implements Runnable
             while (true)
             {
                 if (LOG.isDebugEnabled())
-                    LOG.debug("nextNonEmptyContent rc={} tc={}", _rawContent, _transformedContent);
+                    LOG.debug("nextNonEmptyContent rc={} tc={} {}", _rawContent, _transformedContent, _channelState);
 
                 // Use any unconsumed transformed content
                 if (_transformedContent != null)
