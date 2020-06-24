@@ -133,7 +133,7 @@ public class HttpChannelOverHTTP2 extends HttpChannel implements Closeable, Writ
                     !endStream && !_expect100Continue && !connect;
 
             // We do demand here if delaying for content or connection without a protocol
-            if (_delayedUntilContent || connect && request.getProtocol() == null )
+            if (_delayedUntilContent || connect && request.getProtocol() == null)
                 getStream().demand(1);
 
             if (LOG.isDebugEnabled())
@@ -293,7 +293,7 @@ public class HttpChannelOverHTTP2 extends HttpChannel implements Closeable, Writ
 
         if (LOG.isDebugEnabled())
         {
-            boolean async = !getRequest().getHttpInput().isAsync();
+            boolean async = !getRequest().getHttpInput().isAsyncIO();
             LOG.debug("HTTP2 Request #{}/{}: {} bytes of {} content, handle={}, async={}",
                     stream.getId(),
                     Integer.toHexString(stream.getSession().hashCode()),

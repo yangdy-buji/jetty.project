@@ -77,6 +77,7 @@ public class HttpChannelStateTest
     private HttpChannelState _state;
     private final Queue<HttpInput.Content> _queue = new LinkedList<>();
     private final AtomicBoolean _needy = new AtomicBoolean();
+    private final AtomicBoolean _asyncIO = new AtomicBoolean();
 
     @BeforeEach
     public void init() throws Exception
@@ -150,6 +151,19 @@ public class HttpChannelStateTest
             public void failContent(Throwable failure)
             {
                 failure.printStackTrace();
+            }
+
+            @Override
+            protected HttpInput newHttpInput(HttpChannelState state)
+            {
+                return new HttpInput(state)
+                {
+                    @Override
+                    public boolean isAsyncIO()
+                    {
+                        return _asyncIO.get();
+                    }
+                };
             }
         };
         _state = _channel.getState();
@@ -314,6 +328,8 @@ public class HttpChannelStateTest
     @Test
     public void testAsyncReadH1Sequence() throws Exception
     {
+        _asyncIO.set(true);
+
         // Add some initial content
         HttpInput.Content contentIn =  new HttpInput.Content(BufferUtil.toBuffer("Hello"));
         assertFalse(_state.onContent(contentIn));
@@ -322,10 +338,11 @@ public class HttpChannelStateTest
         assertThat(_state.handling(), is(HttpChannelState.Action.DISPATCH));
         _state.startAsync(null);
 
-        // Initial content should be available and no need to wakeup
+        // set read listener
+        _asyncIO.set(true);
         HttpInput.Content contentOut = _state.nextContent(Mode.ASYNC);
         assertEquals(contentIn, contentOut);
-        assertFalse(_state.onReadReady());
+        assertFalse(_state.onSetReadListenerReady());
 
         // do the onDataAvailable call
         assertThat(_state.unhandle(), is(HttpChannelState.Action.READ_CALLBACK));
@@ -379,10 +396,15 @@ public class HttpChannelStateTest
         contentOut = _state.nextContent(Mode.ASYNC);
         assertEquals(contentLast, contentOut);
 
-        // We get the EOF
+        // We get the Async EOF
         contentOut = _state.nextContent(Mode.ASYNC);
-        assertEquals(HttpInput.EOF, contentOut);
+        assertEquals(HttpInput.AEOF, contentOut);
         assertFalse(_state.onEofConsumed());
+
+        // We get the EOF
+        _state.onContent(HttpInput.EOF);
+        contentOut = _state.nextContent(Mode.POLL);
+        assertEquals(HttpInput.EOF, contentOut);
     }
 
     @Test
@@ -396,10 +418,11 @@ public class HttpChannelStateTest
         assertThat(_state.handling(), is(HttpChannelState.Action.DISPATCH));
         _state.startAsync(null);
 
-        // Initial content should be available and no need to wakeup
+        // set read listener
+        _asyncIO.set(true);
         HttpInput.Content contentOut = _state.nextContent(Mode.ASYNC);
         assertEquals(contentIn, contentOut);
-        assertFalse(_state.onReadReady());
+        assertFalse(_state.onSetReadListenerReady());
 
         // do the onDataAvailable call
         assertThat(_state.unhandle(), is(HttpChannelState.Action.READ_CALLBACK));
@@ -456,9 +479,14 @@ public class HttpChannelStateTest
         contentOut = _state.nextContent(Mode.ASYNC);
         assertEquals(contentLast, contentOut);
 
-        // We get the EOF
+        // We get the Async EOF
         contentOut = _state.nextContent(Mode.ASYNC);
-        assertEquals(HttpInput.EOF, contentOut);
+        assertEquals(HttpInput.AEOF, contentOut);
         assertFalse(_state.onEofConsumed());
+
+        // We get the EOF
+        _state.onContent(HttpInput.EOF);
+        contentOut = _state.nextContent(Mode.POLL);
+        assertEquals(HttpInput.EOF, contentOut);
     }
 }

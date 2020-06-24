@@ -449,7 +449,7 @@ public class HttpConnection extends AbstractConnection implements Runnable, Http
             if (_parser.inContentState())
             {
                 // If we are async, then we have problems to complete neatly
-                if (_input.isAsync())
+                if (_input.isAsyncIO())
                 {
                     if (LOG.isDebugEnabled())
                         LOG.debug("{}unconsumed input while async {}", _parser.isChunking() ? "Possible " : "", this);

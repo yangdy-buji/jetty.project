@@ -53,8 +53,8 @@ public class HttpInput extends ServletInputStream implements Runnable
             return "EMPTY";
         }
     };
+    static final EofContent AEOF = new EofContent("ASYNC EOF");
     static final EofContent EOF = new EofContent("EOF");
-    static final EofContent EOF_COMPLETE = new EofContent("EOF_COMPLETE");
 
     private final byte[] _oneByteBuffer = new byte[1];
 
@@ -151,14 +151,14 @@ public class HttpInput extends ServletInputStream implements Runnable
         return _contentProducer.consumeAll();
     }
 
-    public boolean isAsync()
+    public boolean isAsyncIO()
     {
         return _readListener != null;
     }
 
     public boolean onIdleTimeout(Throwable x)
     {
-        /*
+        /* TODO
         boolean neverDispatched = _channelState.isIdle();
         boolean waitingForContent = available() == 0 && !_eof.isEof();
         if ((waitingForContent || neverDispatched) && !isError())
@@ -227,7 +227,7 @@ public class HttpInput extends ServletInputStream implements Runnable
             throw new IllegalStateException("Async not started");
         if (LOG.isDebugEnabled())
             LOG.debug("setReadListener l={} {}", readListener, this);
-        if (isReady() && _channelState.onReadReady())
+        if (isReady() && _channelState.onSetReadListenerReady())
             scheduleReadListenerNotification();
     }
 
@@ -249,7 +249,7 @@ public class HttpInput extends ServletInputStream implements Runnable
     @Override
     public int read(byte[] b, int off, int len) throws IOException
     {
-        boolean async = isAsync();
+        boolean async = isAsyncIO();
         if (LOG.isDebugEnabled())
             LOG.debug("read({},{},{}){}", Long.toHexString(b.hashCode()), off, len, async ? " async" : "");
 
@@ -340,9 +340,9 @@ public class HttpInput extends ServletInputStream implements Runnable
                     content = _contentProducer.nextNonEmptyContent(Mode.POLL);
                     error = (content instanceof ErrorContent) ? ((ErrorContent)content)._error : null;
                 }
-                else if (content.isLast() && content != EOF_COMPLETE && !(content instanceof ErrorContent))
+                else if (content.isLast() && content == AEOF)
                 {
-                    _channelState.onContent(EOF_COMPLETE);
+                    _channelState.onContent(EOF);
                     if (LOG.isDebugEnabled())
                         LOG.debug("onAllDataRead {}", this);
                     _readListener.onAllDataRead();
@@ -702,15 +702,11 @@ public class HttpInput extends ServletInputStream implements Runnable
         }
     }
 
-    /**
-     * StickyContents are kept in HttpChannelState even after a {@link HttpChannelState#nextContent(Mode)}
-     * call. Used to remember EOF and Errors.
-     */
-    public interface StickyContent
+    interface Sentinel
     {
     }
 
-    static class EofContent extends Content implements StickyContent
+    static class EofContent extends Content implements Sentinel
     {
         private final String _name;
 
@@ -739,7 +735,7 @@ public class HttpInput extends ServletInputStream implements Runnable
         }
     }
 
-    public static class ErrorContent extends Content implements StickyContent
+    public static class ErrorContent extends Content implements Sentinel
     {
         final Throwable _error;
 
@@ -766,7 +762,7 @@ public class HttpInput extends ServletInputStream implements Runnable
 
     /*
      * Early EOF exception.  Don't make a static instance of this as the stack trace
-     * may contain useful info TODO check this assumption.
+     * may contain useful info
      */
     public static class EarlyEofErrorContent extends ErrorContent
     {

@@ -562,7 +562,7 @@ public class Request implements HttpServletRequest
                 throw new IllegalStateException("Form is larger than max length " + maxFormContentSize);
 
             InputStream in = getInputStream();
-            if (_input.isAsync())
+            if (_input.isAsyncIO())
                 throw new IllegalStateException("Cannot extract parameters with async IO");
 
             UrlEncoded.decodeTo(in, params, getCharacterEncoding(), maxFormContentSize, maxFormKeys);

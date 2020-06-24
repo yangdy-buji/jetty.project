@@ -33,6 +33,7 @@ import org.eclipse.jetty.io.QuietException;
 import org.eclipse.jetty.server.handler.ContextHandler;
 import org.eclipse.jetty.server.handler.ContextHandler.Context;
 import org.eclipse.jetty.server.handler.ErrorHandler;
+import org.eclipse.jetty.util.Callback;
 import org.eclipse.jetty.util.thread.Scheduler;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -122,10 +123,10 @@ public class HttpChannelState
      *    \\\   |               |      /
      *     \VV  V               V     /
      *       CONTENT         READY---+
-     *              \       /
-     *               \     /
-     *                V   V
-     *                 EOF
+     *              \       /   |
+     *               \     /    |
+     *                V   V     V
+     *                 EOF<---ALL_DATA
      *
      */
     enum InputState
@@ -251,7 +252,7 @@ public class HttpChannelState
         }
     }
 
-    public boolean onReadReady()
+    public boolean onSetReadListenerReady()
     {
         synchronized (this)
         {
@@ -261,6 +262,8 @@ public class HttpChannelState
                 _inputState = InputState.READY;
             if (_content == null)
                 _content = HttpInput.EMPTY;
+            else if (_content == HttpInput.EOF)
+                _content = HttpInput.AEOF;
             if (_state == State.WAITING)
             {
                 _state = State.WOKEN;
@@ -311,6 +314,8 @@ public class HttpChannelState
     {
         boolean woken = false;
         boolean release = false;
+        Callback callback = null;
+        Throwable error = null;
         synchronized (this)
         {
             if (LOG.isDebugEnabled())
@@ -326,7 +331,7 @@ public class HttpChannelState
 
                 case UNREADY:
                     _inputState = InputState.READY;
-                    _content = early ? new HttpInput.EarlyEofErrorContent() : HttpInput.EOF;
+                    _content = early ? new HttpInput.EarlyEofErrorContent() : HttpInput.AEOF;
                     if (_state == State.WAITING)
                     {
                         _state = State.WOKEN;
@@ -337,7 +342,9 @@ public class HttpChannelState
                 case IDLE:
                 case PRODUCING:
                     _inputState = InputState.CONTENT;
-                    _content = early ? new HttpInput.EarlyEofErrorContent() : HttpInput.EOF;
+                    _content = early
+                        ? new HttpInput.EarlyEofErrorContent()
+                        : (_channel.getRequest().getHttpInput().isAsyncIO() ? HttpInput.AEOF : HttpInput.EOF);
                     break;
 
                 case CONTENT:
@@ -345,7 +352,8 @@ public class HttpChannelState
                     if (early)
                     {
                         HttpInput.EarlyEofErrorContent earlyEof = new HttpInput.EarlyEofErrorContent();
-                        _content.failed(earlyEof._error);
+                        callback = _content;
+                        error = earlyEof._error;
                         _content = earlyEof;
                     }
                     else
@@ -361,6 +369,14 @@ public class HttpChannelState
 
         if (release)
             _semaphore.release();
+
+        if (callback != null)
+        {
+            if (error == null)
+                callback.succeeded();
+            else
+                callback.failed(error);
+        }
         return woken;
 
     }
@@ -369,6 +385,8 @@ public class HttpChannelState
     {
         boolean woken = false;
         boolean release = false;
+        Callback callback = null;
+        Throwable error = null;
         synchronized (this)
         {
             if (LOG.isDebugEnabled())
@@ -385,7 +403,7 @@ public class HttpChannelState
                 case UNREADY:
                     _inputState = InputState.READY;
                     _content = content;
-                    if (_content != HttpInput.EOF_COMPLETE && _state == State.WAITING)
+                    if (_state == State.WAITING)
                     {
                         _state = State.WOKEN;
                         woken = true;
@@ -403,7 +421,7 @@ public class HttpChannelState
                     if (!content.isLast())
                         throw new IllegalStateException();
                     if (_content != content)
-                        _content.succeeded();
+                        callback = _content;
                     _content = content;
                     break;
 
@@ -425,13 +443,14 @@ public class HttpChannelState
                         }
                         else
                         {
-                            _content.failed(errorContent._error);
+                            callback = _content;
+                            error = errorContent._error;
                             _content = content;
                         }
                         break;
                     }
                     if (_content != content)
-                        _content.succeeded();
+                        callback = content;
                     _content = content;
                     break;
 
@@ -440,8 +459,21 @@ public class HttpChannelState
             }
         }
 
-        if (release)
-            _semaphore.release();
+        try
+        {
+            if (callback != null)
+            {
+                if (error == null)
+                    callback.succeeded();
+                else
+                    callback.failed(error);
+            }
+        }
+        finally
+        {
+            if (release)
+                _semaphore.release();
+        }
         return woken;
     }
 
@@ -466,7 +498,7 @@ public class HttpChannelState
                     case IDLE:
                         produce = true;
                         _inputState = InputState.PRODUCING;
-                        break; // TODO more efficient to fall through here.
+                        break;
 
                     case PRODUCING:
                         switch (mode)
@@ -495,8 +527,8 @@ public class HttpChannelState
                         HttpInput.Content content = _content;
                         if (_content.isLast())
                         {
-                            if (!(content instanceof HttpInput.StickyContent))
-                                _content = HttpInput.EOF;
+                            if (!(_content instanceof HttpInput.Sentinel))
+                                _content = _channel.getRequest().getHttpInput().isAsyncIO() ? HttpInput.AEOF : HttpInput.EOF;
                             _inputState = InputState.EOF;
                         }
                         else
@@ -782,6 +814,10 @@ public class HttpChannelState
                         return Action.READ_CALLBACK;
                     case READY:
                         return Action.READ_CALLBACK;
+                    case EOF:
+                        if (_content == HttpInput.AEOF)
+                            return Action.READ_CALLBACK;
+                        break;
                     default:
                         break;
                 }
@@ -1421,7 +1457,6 @@ public class HttpChannelState
     {
         synchronized (this)
         {
-            // TODO review
             return _requestState == RequestState.EXPIRE || _requestState == RequestState.EXPIRING;
         }
     }

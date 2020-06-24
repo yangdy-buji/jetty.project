@@ -118,9 +118,9 @@ HttpInput->ContentProducer: nextNon\nNullContent\n(BLOCK)
                         end
                     return
                 ...
-                else CONTENT || READY
+                else CONTENT
                         note over HttpChannelState
-                        CONTENT||READY->IDLE
+                        CONTENT->IDLE
                         end note
                     return content
                 end

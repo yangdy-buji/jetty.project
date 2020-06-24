@@ -175,7 +175,7 @@ public class HttpInputTest
     @Test
     public void testInit() throws Exception
     {
-        assertFalse(_in.isAsync());
+        assertFalse(_in.isAsyncIO());
     }
 
     @Test
