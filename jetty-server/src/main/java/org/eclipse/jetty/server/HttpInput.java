@@ -458,47 +458,40 @@ public class HttpInput extends ServletInputStream implements Runnable
                 if (LOG.isDebugEnabled())
                     LOG.debug("nextNonEmptyContent rc={} tc={} {}", _rawContent, _transformedContent, _channelState);
 
-                // Use any unconsumed transformed content
-                if (_transformedContent != null)
-                {
-                    if (_transformedContent.hasContent())
-                        return _transformedContent;
-
-                    if (_transformedContent.isLast())
-                    {
-                        // The last content is succeeded once it is consumed.
-                        // We null the raw content to indicate that succeeded has been called,
-                        // but keep the transformed content so that EOF can be returned multiple
-                        // times.
-                        if (_rawContent != null)
-                        {
-                            if (_transformedContent != _rawContent)
-                                _transformedContent.succeeded();
-                            _rawContent.succeeded();
-                            _rawContent = null;
-                        }
-                        return _transformedContent;
-                    }
-
-                    if (_transformedContent != _rawContent)
-                        _transformedContent.succeeded();
-                    _transformedContent = null;
-                }
-
-                // Use any unconsumed raw content
-                if (_rawContent != null)
-                {
-                    if (_rawContent.hasContent() || _rawContent.isLast())
-                    {
-                        _transformedContent = _interceptor == null ? _rawContent : _interceptor.readFrom(_rawContent);
-                        continue;
-                    }
-
-                    _rawContent.succeeded();
-                }
-
                 try
                 {
+                    // Use any unconsumed transformed content
+                    if (_transformedContent != null)
+                    {
+                        if (_transformedContent.hasContent())
+                            return _transformedContent;
+
+                        if (_transformedContent != _rawContent)
+                            _transformedContent.succeeded();
+
+                        if (_transformedContent.isLast())
+                        {
+                            // Always fetch fresh EOF to see any change in sentinel
+                            _rawContent.succeeded();
+                            _rawContent = _transformedContent = _channelState.nextContent(Mode.POLL);
+                            return _transformedContent;
+                        }
+
+                        _transformedContent = null;
+                    }
+
+                    // Use any unconsumed raw content
+                    if (_rawContent != null)
+                    {
+                        if (_rawContent.hasContent() || _rawContent.isLast())
+                        {
+                            _transformedContent = _interceptor == null ? _rawContent : _interceptor.readFrom(_rawContent);
+                            continue;
+                        }
+
+                        _rawContent.succeeded();
+                    }
+
                     _rawContent = _channelState.nextContent(mode);
 
                     if (_rawContent == null)
