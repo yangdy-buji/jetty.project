@@ -684,7 +684,7 @@ public abstract class HttpChannel implements Runnable, HttpOutput.Interceptor
     {
     }
 
-    public void needContent(boolean async)
+    public void needContent()
     {
     }
 

@@ -134,7 +134,7 @@ public class HttpChannelOverHTTP2 extends HttpChannel implements Closeable, Writ
 
             // We do demand here if delaying for content or connection without a protocol
             if (_delayedUntilContent || connect && request.getProtocol() == null)
-                getStream().demand(1);
+                needContent();
 
             if (LOG.isDebugEnabled())
             {
@@ -232,9 +232,12 @@ public class HttpChannelOverHTTP2 extends HttpChannel implements Closeable, Writ
     }
 
     @Override
-    public void needContent(boolean async)
+    public void needContent()
     {
-        if (demanding.compareAndSet(false, true))
+        boolean demand = demanding.compareAndSet(false, true);
+        if (LOG.isDebugEnabled())
+            LOG.debug("needContent() demand={}", demand);
+        if (demand)
             getStream().demand(1);
     }
 

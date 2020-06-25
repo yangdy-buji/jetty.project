@@ -132,7 +132,7 @@ public class HttpChannelStateTest
         })
         {
             @Override
-            public void needContent(boolean async)
+            public void needContent()
             {
                 _needy.set(true);
             }
@@ -340,14 +340,12 @@ public class HttpChannelStateTest
 
         // set read listener
         _asyncIO.set(true);
-        HttpInput.Content contentOut = _state.nextContent(Mode.ASYNC);
-        assertEquals(contentIn, contentOut);
-        assertFalse(_state.onSetReadListenerReady());
+        assertFalse(_state.onSetReadListener());
 
         // do the onDataAvailable call
         assertThat(_state.unhandle(), is(HttpChannelState.Action.READ_CALLBACK));
-        contentOut = _state.nextContent(Mode.ASYNC);
-        assertEquals(HttpInput.EMPTY, contentOut);
+        HttpInput.Content contentOut = _state.nextContent(Mode.ASYNC);
+        assertEquals(contentIn, contentOut);
 
         // Try to consume more content
         contentOut = _state.nextContent(Mode.ASYNC);
@@ -420,14 +418,12 @@ public class HttpChannelStateTest
 
         // set read listener
         _asyncIO.set(true);
-        HttpInput.Content contentOut = _state.nextContent(Mode.ASYNC);
-        assertEquals(contentIn, contentOut);
-        assertFalse(_state.onSetReadListenerReady());
+        assertFalse(_state.onSetReadListener());
 
         // do the onDataAvailable call
         assertThat(_state.unhandle(), is(HttpChannelState.Action.READ_CALLBACK));
-        contentOut = _state.nextContent(Mode.ASYNC);
-        assertEquals(HttpInput.EMPTY, contentOut);
+        HttpInput.Content contentOut = _state.nextContent(Mode.ASYNC);
+        assertEquals(contentIn, contentOut);
 
         // Try to consume more content
         contentOut = _state.nextContent(Mode.ASYNC);

@@ -131,7 +131,7 @@ public class HttpInputTest
         })
         {
             @Override
-            public void needContent(boolean async)
+            public void needContent()
             {
                 _needy.set(true);
             }

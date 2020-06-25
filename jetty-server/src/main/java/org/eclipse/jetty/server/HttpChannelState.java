@@ -252,24 +252,61 @@ public class HttpChannelState
         }
     }
 
-    public boolean onSetReadListenerReady()
+    public boolean onSetReadListener()
     {
-        synchronized (this)
+        // This is similar to a non-consuming version of nextContent(ASYNC)
+
+        while (true)
         {
-            if (LOG.isDebugEnabled())
-                LOG.debug("wake {}", this);
-            if (_inputState != InputState.READY)
-                _inputState = InputState.READY;
-            if (_content == null)
-                _content = HttpInput.EMPTY;
-            else if (_content == HttpInput.EOF)
-                _content = HttpInput.AEOF;
-            if (_state == State.WAITING)
+            boolean unready = false;
+
+            synchronized (this)
             {
-                _state = State.WOKEN;
-                return true;
+                if (LOG.isDebugEnabled())
+                    LOG.debug("onSetReadListenerReady() {}", this);
+
+                switch (_inputState)
+                {
+                    case IDLE:
+                        _inputState = InputState.PRODUCING;
+                        break;
+
+                    case PRODUCING:
+                        _inputState = InputState.UNREADY;
+                        unready = true;
+                        break;
+
+                    case CONTENT:
+                        _inputState = InputState.READY;
+                        if (_state == State.WAITING)
+                        {
+                            _state = State.WOKEN;
+                            return true;
+                        }
+                        return false;
+
+                    case EOF:
+                        _inputState = InputState.EOF;
+                        _content = HttpInput.AEOF;
+                        if (_state == State.WAITING)
+                        {
+                            _state = State.WOKEN;
+                            return true;
+                        }
+                        return false;
+
+                    default:
+                        throw new IllegalStateException();
+                }
             }
-            return false;
+
+            if (unready)
+            {
+                _channel.needContent();
+                return false;
+            }
+            // try producing content
+            _channel.produceContent();
         }
     }
 
@@ -304,7 +341,6 @@ public class HttpChannelState
                     throw new IllegalStateException(toStringLocked());
             }
         }
-
         if (release)
             _semaphore.release();
         return woken;
@@ -536,6 +572,8 @@ public class HttpChannelState
                             _content = null;
                             _inputState = InputState.IDLE;
                         }
+                        if (LOG.isDebugEnabled())
+                            LOG.debug("nextContent({}) c={}", mode, content);
                         return content;
 
                     default:
@@ -546,11 +584,10 @@ public class HttpChannelState
                     LOG.debug("nextContent({}) is={} p={} n={} a={}", mode, _inputState, produce, need, acquire);
             }
 
-
             if (produce)
                 _channel.produceContent();
             if (need)
-                _channel.needContent(!acquire);
+                _channel.needContent();
             if (acquire)
                 _semaphore.acquire();
         }

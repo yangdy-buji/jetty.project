@@ -227,7 +227,8 @@ public class HttpInput extends ServletInputStream implements Runnable
             throw new IllegalStateException("Async not started");
         if (LOG.isDebugEnabled())
             LOG.debug("setReadListener l={} {}", readListener, this);
-        if (isReady() && _channelState.onSetReadListenerReady())
+
+        if (_channelState.onSetReadListener())
             scheduleReadListenerNotification();
     }
 
@@ -456,7 +457,7 @@ public class HttpInput extends ServletInputStream implements Runnable
             while (true)
             {
                 if (LOG.isDebugEnabled())
-                    LOG.debug("nextNonEmptyContent rc={} tc={} {}", _rawContent, _transformedContent, _channelState);
+                    LOG.debug("nextNonEmptyContent({}) rc={} tc={} {}", mode, _rawContent, _transformedContent, _channelState);
 
                 try
                 {

@@ -323,9 +323,12 @@ public class HttpChannelOverHttp extends HttpChannel implements HttpParser.Reque
     }
 
     @Override
-    public void needContent(boolean async)
+    public void needContent()
     {
-        if (async)
+        boolean asyncIO = getRequest().getHttpInput().isAsyncIO();
+        if (LOG.isDebugEnabled())
+            LOG.debug("needContent() asyncIO={}", asyncIO);
+        if (asyncIO)
             _httpConnection.asyncReadFillInterested();
         else
             _httpConnection.blockingReadFillInterested();
