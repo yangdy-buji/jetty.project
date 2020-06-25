@@ -1093,7 +1093,7 @@ public class AsyncIOServletTest extends AbstractTest<AsyncIOServletTest.AsyncTra
                         while (input.isReady() && !input.isFinished())
                         {
                             int read = input.read();
-                            System.err.printf("XXXXXXXXXXXXXXXXXXXXX %x%n", read);
+                            // System.err.printf("%x%n", read);
                             readLatch.countDown();
                         }
                     }

@@ -852,7 +852,7 @@ public class HttpChannelState
                     case READY:
                         return Action.READ_CALLBACK;
                     case EOF:
-                        if (_content == HttpInput.AEOF)
+                        if (_content == HttpInput.AEOF || _content instanceof HttpInput.ErrorContent)
                             return Action.READ_CALLBACK;
                         break;
                     default:

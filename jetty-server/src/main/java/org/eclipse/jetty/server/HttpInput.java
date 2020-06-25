@@ -176,6 +176,11 @@ public class HttpInput extends ServletInputStream implements Runnable
 
     public boolean onContentError(Throwable x)
     {
+        if (LOG.isDebugEnabled())
+        {
+            x.addSuppressed(new Throwable());
+            LOG.debug("onContentError", x);
+        }
         return _channelState.onContent(new ErrorContent(x));
     }
 
@@ -440,7 +445,7 @@ public class HttpInput extends ServletInputStream implements Runnable
                         if (content.hasContent())
                             content.skip(content.remaining());
                         else if (content.isLast())
-                            return true;
+                            return !(content instanceof ErrorContent);
                     }
                 }
                 catch (IOException e)
