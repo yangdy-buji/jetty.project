@@ -32,7 +32,7 @@ public class StdErrAppender implements JettyAppender
      * Configuration keys specific to the StdErrAppender
      */
     static final String NAME_CONDENSE_KEY = "org.eclipse.jetty.logging.appender.NAME_CONDENSE";
-    static final String TAG_PAD_KEY = "org.eclipse.jetty.logging.appender.TAG_PAD";
+    static final String MESSAGE_ALIGN_KEY = "org.eclipse.jetty.logging.appender.MESSAGE_ALIGN";
     static final String MESSAGE_ESCAPE_KEY = "org.eclipse.jetty.logging.appender.MESSAGE_ESCAPE";
     static final String ZONEID_KEY = "org.eclipse.jetty.logging.appender.ZONE_ID";
     private static final String EOL = System.lineSeparator();
@@ -50,9 +50,9 @@ public class StdErrAppender implements JettyAppender
     private final boolean escapedMessages;
 
     /**
-     * The fixed size of the thread name to use for output
+     * The column to align the start of all messages to
      */
-    private final String tagPadding;
+    private final int messageAlignColumn;
 
     /**
      * The stream to write logging events to.
@@ -88,16 +88,7 @@ public class StdErrAppender implements JettyAppender
 
         this.condensedNames = config.getBoolean(NAME_CONDENSE_KEY, true);
         this.escapedMessages = config.getBoolean(MESSAGE_ESCAPE_KEY, true);
-        int padding = config.getInt(TAG_PAD_KEY, -1);
-        if (padding <= 0)
-            this.tagPadding = null;
-        else
-        {
-            StringBuilder b = new StringBuilder(padding);
-            while (b.length() < padding)
-                b.append(' ');
-            this.tagPadding = b.toString();
-        }
+        this.messageAlignColumn = config.getInt(MESSAGE_ALIGN_KEY, 0);
     }
 
     @Override
@@ -125,15 +116,9 @@ public class StdErrAppender implements JettyAppender
         return escapedMessages;
     }
 
-    @Deprecated
-    public int getThreadPadding()
+    public int getMessageAlignColumn()
     {
-        return 0;
-    }
-
-    public int getTagPadding()
-    {
-        return tagPadding == null ? 0 : tagPadding.length();
+        return messageAlignColumn;
     }
 
     public PrintStream getStream()
@@ -158,24 +143,27 @@ public class StdErrAppender implements JettyAppender
 
         // Logger Name
         builder.append(':');
-        String name = condensedNames ? logger.getCondensedName() : logger.getName();
-        builder.append(name);
+        if (condensedNames)
+        {
+            builder.append(logger.getCondensedName());
+        }
+        else
+        {
+            builder.append(logger.getName());
+        }
 
         // Thread Name
         builder.append(':');
         builder.append(threadName);
         builder.append(':');
 
-        // Padding
-        if (tagPadding == null)
-            builder.append(' ');
-        else
-        {
-            int tagLen = name.length() + threadName.length() + 2;
-            builder.append(tagPadding, 0, Math.max(1, tagPadding.length() - tagLen));
-        }
-
         // Message
+        int padAmount = messageAlignColumn - builder.length();
+        if (padAmount > 0)
+            builder.append(" ".repeat(padAmount));
+        else
+            builder.append(' ');
+
         FormattingTuple ft = MessageFormatter.arrayFormat(message, argumentArray);
         appendEscaped(builder, ft.getMessage());
         if (cause == null)

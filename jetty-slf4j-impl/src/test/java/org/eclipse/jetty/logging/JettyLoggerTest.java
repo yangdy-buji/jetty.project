@@ -82,52 +82,25 @@ public class JettyLoggerTest
     @Test
     public void testStdErrLogDebug()
     {
-        Properties props = new Properties();
-        props.setProperty(StdErrAppender.TAG_PAD_KEY, "20");
-        JettyLoggerConfiguration config = new JettyLoggerConfiguration(props);
+        JettyLoggerConfiguration config = new JettyLoggerConfiguration();
         JettyLoggerFactory factory = new JettyLoggerFactory(config);
 
         StdErrAppender appender = (StdErrAppender)factory.getRootLogger().getAppender();
         CapturedStream output = new CapturedStream();
         appender.setStream(output);
 
-        JettyLogger log = factory.getJettyLogger("jetty");
-        JettyLogger logX = factory.getJettyLogger("jetty.xxx");
-        JettyLogger logY = factory.getJettyLogger("jetty.yyyy");
+        JettyLogger log = factory.getJettyLogger("xxx");
 
         log.setLevel(JettyLevel.DEBUG);
-        logX.debug("testing {} {}", "test", "debug");
-        logX.info("testing {} {}", "test", "info");
-        logX.warn("testing {} {}", "test", "warn");
-        logY.debug("testing {} {}", "test", "debug");
-        logY.info("testing {} {}", "test", "info");
-        logY.warn("testing {} {}", "test", "warn");
-
-        Thread.currentThread().setName("otherThread");
-        logX.info("testing {} {}", "test", "info");
-        logY.info("testing {} {}", "test", "info");
-
-        Thread.currentThread().setName("veryLongThreadName");
-        logX.info("testing {} {}", "test", "info");
-        logY.info("testing {} {}", "test", "info");
-
+        log.debug("testing {} {}", "test", "debug");
+        log.info("testing {} {}", "test", "info");
+        log.warn("testing {} {}", "test", "warn");
         log.setLevel(JettyLevel.INFO);
-        logX.debug("YOU SHOULD NOT SEE THIS!");
+        log.debug("YOU SHOULD NOT SEE THIS!");
 
-        output.assertContains("DEBUG:j.xxx:tname:        testing test debug");
-        output.assertContains("INFO :j.xxx:tname:        testing test info");
-        output.assertContains("WARN :j.xxx:tname:        testing test warn");
-
-        output.assertContains("DEBUG:j.yyyy:tname:       testing test debug");
-        output.assertContains("INFO :j.yyyy:tname:       testing test info");
-        output.assertContains("WARN :j.yyyy:tname:       testing test warn");
-
-        output.assertContains("INFO :j.xxx:otherThread:  testing test info");
-        output.assertContains("INFO :j.yyyy:otherThread: testing test info");
-
-        output.assertContains("INFO :j.xxx:veryLongThreadName: testing test info");
-        output.assertContains("INFO :j.yyyy:veryLongThreadName: testing test info");
-
+        output.assertContains("DEBUG:xxx:tname: testing test debug");
+        output.assertContains("INFO :xxx:tname: testing test info");
+        output.assertContains("WARN :xxx:tname: testing test warn");
         output.assertNotContains("YOU SHOULD NOT SEE THIS!");
     }
 
@@ -187,6 +160,57 @@ public class JettyLoggerTest
         output.assertContains("Message with ? escape");
         log.info(th.toString());
         output.assertContains("Message with ? escape");
+    }
+
+    @Test
+    public void testStdErrLogMessageAlignment()
+    {
+        Properties props = new Properties();
+        props.setProperty(StdErrAppender.MESSAGE_ALIGN_KEY, "50");
+        JettyLoggerConfiguration config = new JettyLoggerConfiguration(props);
+        JettyLoggerFactory factory = new JettyLoggerFactory(config);
+
+        StdErrAppender appender = (StdErrAppender)factory.getRootLogger().getAppender();
+        CapturedStream output = new CapturedStream();
+        appender.setStream(output);
+
+        JettyLogger logJetty = factory.getJettyLogger("jetty");
+        JettyLogger logJettyDeep = factory.getJettyLogger("jetty.from.deep");
+        JettyLogger logJettyDeeper = factory.getJettyLogger("jetty.component.deeper.still");
+
+        logJetty.setLevel(JettyLevel.DEBUG);
+        logJettyDeep.debug("testing {} {}", "test", "debug");
+        logJettyDeep.info("testing {} {}", "test", "info");
+        logJettyDeep.warn("testing {} {}", "test", "warn");
+        logJettyDeeper.debug("testing {} {}", "test", "debug");
+        logJettyDeeper.info("testing {} {}", "test", "info");
+        logJettyDeeper.warn("testing {} {}", "test", "warn");
+
+        Thread.currentThread().setName("otherThread");
+        logJetty.info("testing {} {}", "test", "info");
+        logJettyDeep.info("testing {} {}", "test", "info");
+        logJettyDeeper.info("testing {} {}", "test", "info");
+
+        Thread.currentThread().setName("veryLongThreadName");
+        logJetty.info("testing {} {}", "test", "info");
+        logJettyDeep.info("testing {} {}", "test", "info");
+        logJettyDeeper.info("testing {} {}", "test", "info");
+
+        output.assertContains("DEBUG:jf.deep:tname:      testing test debug");
+        output.assertContains("INFO :jf.deep:tname:      testing test info");
+        output.assertContains("WARN :jf.deep:tname:      testing test warn");
+
+        output.assertContains("DEBUG:jcd.still:tname:    testing test debug");
+        output.assertContains("INFO :jcd.still:tname:    testing test info");
+        output.assertContains("WARN :jcd.still:tname:    testing test warn");
+
+        output.assertContains("INFO :jetty:otherThread:  testing test info");
+        output.assertContains("INFO :jf.deep:otherThread: testing test info");
+        output.assertContains("INFO :jcd.still:otherThread: testing test info");
+
+        output.assertContains("INFO :jetty:veryLongThreadName: testing test info");
+        output.assertContains("INFO :jf.deep:veryLongThreadName: testing test info");
+        output.assertContains("INFO :jcd.still:veryLongThreadName: testing test info");
     }
 
     /**
