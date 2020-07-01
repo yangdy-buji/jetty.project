@@ -468,20 +468,19 @@ public class HttpChannelState
                     if (_content.isLast() && !content.isLast())
                         throw new IllegalStateException();
 
-                    if (content instanceof HttpInput.ErrorContent)
+                    Throwable contentError = content.getError();
+                    if (contentError != null)
                     {
-                        HttpInput.ErrorContent errorContent = (HttpInput.ErrorContent)content;
-                        if (_content instanceof HttpInput.ErrorContent)
-                        {
-                            HttpInput.ErrorContent existingErrorContent = ((HttpInput.ErrorContent)_content);
-                            if (existingErrorContent._error != errorContent._error)
-                                existingErrorContent._error.addSuppressed(errorContent._error);
-                        }
-                        else
+                        Throwable existingErrorContent = _content.getError();
+                        if (existingErrorContent == null)
                         {
                             callback = _content;
-                            error = errorContent._error;
+                            error = contentError;
                             _content = content;
+                        }
+                        else if (existingErrorContent != contentError)
+                        {
+                            existingErrorContent.addSuppressed(contentError);
                         }
                         break;
                     }
@@ -563,7 +562,7 @@ public class HttpChannelState
                         HttpInput.Content content = _content;
                         if (_content.isLast())
                         {
-                            if (!(_content instanceof HttpInput.Sentinel))
+                            if (_content.getError() == null)
                                 _content = _channel.getRequest().getHttpInput().isAsyncIO() ? HttpInput.AEOF : HttpInput.EOF;
                             _inputState = InputState.EOF;
                         }
@@ -852,7 +851,7 @@ public class HttpChannelState
                     case READY:
                         return Action.READ_CALLBACK;
                     case EOF:
-                        if (_content == HttpInput.AEOF || _content instanceof HttpInput.ErrorContent)
+                        if (_content == HttpInput.AEOF || _content.getError() != null)
                             return Action.READ_CALLBACK;
                         break;
                     default:

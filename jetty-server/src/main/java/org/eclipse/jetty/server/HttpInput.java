@@ -118,32 +118,6 @@ public class HttpInput extends ServletInputStream implements Runnable
         return _contentProducer.getRawContentArrived();
     }
 
-    /**
-     * This method should be called to signal that an EOF has been detected before all the expected content arrived.
-     * <p>
-     * Typically this will result in an EOFException being thrown from a subsequent read rather than a -1 return.
-     *
-     * @return true if content channel woken for read
-     */
-    public boolean earlyEOF()
-    {
-        if (LOG.isDebugEnabled())
-            LOG.debug("received early EOF");
-        return _channelState.onEof(true);
-    }
-
-    /**
-     * This method should be called to signal that all the expected content arrived.
-     *
-     * @return true if content channel woken for read
-     */
-    public boolean eof()
-    {
-        if (LOG.isDebugEnabled())
-            LOG.debug("received EOF");
-        return _channelState.onEof(false);
-    }
-
     public boolean consumeAll()
     {
         if (LOG.isDebugEnabled())
@@ -610,6 +584,11 @@ public class HttpInput extends ServletInputStream implements Runnable
             return false;
         }
 
+        public Throwable getError()
+        {
+            return null;
+        }
+
         public ByteBuffer getByteBuffer()
         {
             return _content;
@@ -701,11 +680,7 @@ public class HttpInput extends ServletInputStream implements Runnable
         }
     }
 
-    interface Sentinel
-    {
-    }
-
-    static class EofContent extends Content implements Sentinel
+    static class EofContent extends Content
     {
         private final String _name;
 
@@ -734,7 +709,7 @@ public class HttpInput extends ServletInputStream implements Runnable
         }
     }
 
-    public static class ErrorContent extends Content implements Sentinel
+    public static class ErrorContent extends Content
     {
         final Throwable _error;
 
@@ -751,11 +726,23 @@ public class HttpInput extends ServletInputStream implements Runnable
         }
 
         @Override
+        public Throwable getError()
+        {
+            return _error;
+        }
+
+        @Override
         public int get(byte[] buffer, int offset, int length) throws IOException
         {
             if (_error instanceof IOException)
                 throw (IOException)_error;
             throw new IOException(_error);
+        }
+
+        @Override
+        public String toString()
+        {
+            return String.format("%s{%s}", super.toString(), _error);
         }
     }
 
@@ -763,9 +750,9 @@ public class HttpInput extends ServletInputStream implements Runnable
      * Early EOF exception.  Don't make a static instance of this as the stack trace
      * may contain useful info
      */
-    public static class EarlyEofErrorContent extends ErrorContent
+    static class EarlyEofErrorContent extends ErrorContent
     {
-        public EarlyEofErrorContent()
+        EarlyEofErrorContent()
         {
             super(new EofException("Early EOF"));
         }

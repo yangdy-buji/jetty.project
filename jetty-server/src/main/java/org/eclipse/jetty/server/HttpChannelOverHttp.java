@@ -91,7 +91,7 @@ public class HttpChannelOverHttp extends HttpChannel implements HttpParser.Reque
             if (_metadata == null)
                 _metadata = _requestBuilder.build();
             onRequest(_metadata);
-            getRequest().getHttpInput().earlyEOF();
+            getState().onContent(new HttpInput.ErrorContent(failure));
         }
         catch (Exception e)
         {

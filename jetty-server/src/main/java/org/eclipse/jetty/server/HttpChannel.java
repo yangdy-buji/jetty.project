@@ -716,7 +716,7 @@ public abstract class HttpChannel implements Runnable, HttpOutput.Interceptor
     {
         if (LOG.isDebugEnabled())
             LOG.debug("onRequestComplete {}", this);
-        boolean result = _request.getHttpInput().eof(); // TODO why isn't this in onContentComplete
+        boolean result = _state.onEof(false); // TODO why isn't this in onContentComplete
         _combinedListener.onRequestEnd(_request);
         return result;
     }
@@ -754,7 +754,7 @@ public abstract class HttpChannel implements Runnable, HttpOutput.Interceptor
 
     public boolean onEarlyEOF()
     {
-        return _request.getHttpInput().earlyEOF();
+        return _state.onEof(true);
     }
 
     public void onBadMessage(BadMessageException failure)

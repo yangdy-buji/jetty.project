@@ -313,6 +313,7 @@ public class HttpChannelStateTest
         // Get last content
         contentOut = _state.nextContent(Mode.BLOCK);
         assertEquals(contentLast, contentOut);
+        assertTrue(contentOut.isLast());
 
         // Get EOF
         contentOut = _state.nextContent(Mode.BLOCK);
@@ -474,6 +475,7 @@ public class HttpChannelStateTest
         assertThat(_state.unhandle(), is(HttpChannelState.Action.READ_CALLBACK));
         contentOut = _state.nextContent(Mode.ASYNC);
         assertEquals(contentLast, contentOut);
+        assertTrue(contentOut.isLast());
 
         // We get the Async EOF
         contentOut = _state.nextContent(Mode.ASYNC);
