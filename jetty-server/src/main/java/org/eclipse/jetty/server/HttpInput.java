@@ -463,12 +463,15 @@ public class HttpInput extends ServletInputStream implements Runnable
                     // Use any unconsumed raw content
                     if (_rawContent != null)
                     {
-                        if (_rawContent.hasContent() || _rawContent.isLast())
+                        _transformedContent = _interceptor == null ? _rawContent : _interceptor.readFrom(_rawContent);
+                        if (_transformedContent != null)
                         {
-                            _transformedContent = _interceptor == null ? _rawContent : _interceptor.readFrom(_rawContent);
-                            continue;
+                            if (_transformedContent.hasContent() || _transformedContent.isLast())
+                                continue;
+                            if (_transformedContent != _rawContent)
+                                _transformedContent.succeeded();
+                            _transformedContent = null;
                         }
-
                         _rawContent.succeeded();
                     }
 
@@ -483,7 +486,7 @@ public class HttpInput extends ServletInputStream implements Runnable
                                 return null;
 
                             default:
-                                break;
+                                break; // TODO ISE???
                         }
                     }
                 }
