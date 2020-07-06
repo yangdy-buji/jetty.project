@@ -1,7 +1,6 @@
 @startuml
 title "HttpInput"
 
-participant Connection as "\nConnection\n"
 participant HttpChannel as "Http\nChannel\n"
 participant HttpChannelState as "Http\nChannel\nState"
 participant Semaphore as "\nSemaphore\n"
@@ -17,120 +16,51 @@ Application->HttpInput: read
 activate Application
 HttpInput->ContentProducer: nextNon\nNullContent\n(BLOCK)
     loop for non null content
-        ContentProducer->HttpChannelState: nextContent(BLOCK)
-            loop for exiting inputState
-                alt inputState
-                else IDLE
-                    note over HttpChannelState
-                    IDLE->PRODUCING
-                    end note
-                    HttpChannelState->HttpChannel: produceContent
-                        alt implementation
-                        else HTTP1
-                            HttpChannel->Connection: fillAndParse
-                                alt Content available
-                                    Connection->HttpChannel: addContent
-                                        HttpChannel->HttpChannelState: onContent
-                                            note over HttpChannelState
-                                            PRODUCING->CONTENT
-                                            remember content
-                                            end note
-                                        return
-                                    return
-                                end
-                            return
-                            ...
-                        else HTTP2
-                            alt if not already demanding
-                                HttpChannel->Connection: demand(1)
-                                    alt Content available or any time after
-                                        Connection->HttpChannel: onData
-                                            HttpChannel->HttpChannelState: onContent
-                                                note over HttpChannelState
-                                                PRODUCING->CONTENT
-                                                remember content
-                                                end note
-                                            return
-                                        return
-                                    end
-                                return
-                            end
-                        end
-                    return
-                    ...
-                else PRODUCING
-                    note over HttpChannelState
-                    PRODUCING->BLOCKING
-                    end note
-
-                    HttpChannelState->HttpChannel: needContent
-                        alt implementation
-                        else HTTP1
-                            HttpChannel->Connection: fillInterest
-                                note over HttpChannel
-                                    onFillable below could happen in this scope
-                                    or any time from now
-                                end note
-                            return
-                            ...
-                        else HTTP2
-                            alt if not already demanding
-                                HttpChannel->Connection: demand(1)
-                                    note over HttpChannel
-                                        onData below could already have
-                                        been called, could happen in this scope
-                                        or any time from now
-                                    end note
-                                return
-                            end
-                        end
-                    return
-
-                    HttpChannelState->Semaphore: acquire
-                        ... waiting for input ...
-                        alt implementation
-                        else HTTP1
-                            Connection->HttpChannel: onFillable
-                            activate Connection
-                                HttpChannel->HttpChannelState: onContentProducable
-                                    note over HttpChannelState
-                                    BLOCKING->IDLE
-                                    end note
-                                    HttpChannelState->Semaphore:release
-                                    return
-                                return false
-                            return false
-                            deactivate Connection
-                            ...
-                        else HTTP2
-                            Connection->HttpChannel: onData
-                            activate Connection
-                                HttpChannel->HttpChannelState: onContent
-                                        note over HttpChannelState
-                                        BLOCKING->CONTENT
-                                        remember content
-                                        end note
-                                        HttpChannelState->Semaphore:release
-                                        return
-                                    return false
-                            return false
-                            deactivate Connection
-                        end
-                    return
-                ...
-                else CONTENT
+        ContentProducer->ContentProducer: nextContent(BLOCK)
+            loop
+                ContentProducer->HttpChannel: produceContent
+                return
+                alt content
+                else content==null
+                    ContentProducer->HttpChannelState: blockForContent
                         note over HttpChannelState
-                        CONTENT->IDLE
+                        IDLE->BLOCKING
                         end note
-                    return content
-                end
-                note over HttpChannelState
-                loop around to handle next state
-                end note
+                        HttpChannelState->HttpChannel: needContent
+                        return
+                        alt needContent
+                        else true
+                            note over HttpChannelState
+                            BLOCKING->IDLE
+                            end note
+                            autoactivate off
+                            HttpChannelState-->ContentProducer
+                            autoactivate on
+                            ...
+                        else false
+                            HttpChannelState->Semaphore: acquire
+                            ... waiting for input ...
+HttpChannel->HttpChannelState: onProducable
+    activate HttpChannel
+    note over HttpChannelState
+    BLOCKING->IDLE
+    end note
+    HttpChannelState->Semaphore:release
+    return
+return
+deactivate HttpChannel
+                            return
+                        return
+                        ...
+                    end
+                    ...
+                else content!=null
+                return rawContent
+                |||
             end
+        end
             ContentProducer->ContentProducer: transform
             return
-            |||
         alt if content
             return content
         end
@@ -147,57 +77,27 @@ Application->HttpInput: available
 activate Application
 HttpInput->ContentProducer: nextNon\nNullContent\n(POLL)
     loop for non null content
-        ContentProducer->HttpChannelState: nextContent(POLL)
-            loop until exiting inputState
-                alt inputState
-                else UNREADY
-                    autoactivate off
-                    HttpChannelState-->ContentProducer: null
-                    autoactivate on
-                    ...
-                else CONTENT||READY
-                    note over HttpChannelState
-                    CONTENT||READY->IDLE
-                    end note
-                    autoactivate off
-                    HttpChannelState->ContentProducer: content
-                    autoactivate on
-                    ...
-                else IDLE
-                    note over HttpChannelState
-                    IDLE->PRODUCING
-                    end note
-                    HttpChannelState->HttpChannel: produceContent
-                        note over HttpChannel
-                            as produce content above
-                        end note
-                    return
-                    ...
-                else PRODUCING
-                    note over HttpChannelState
-                    PRODUCING->IDLE
-                    end note
-                    autoactivate off
-                    HttpChannelState->ContentProducer: null
-                    deactivate HttpChannelState
-                    autoactivate on
-                    ...
-                end
+        ContentProducer->ContentProducer: nextContent(POLL)
+            loop
+                ContentProducer->HttpChannel: produceContent
+                return
 
-            note over HttpChannelState
-            loop around to handle next state
-            end note
-        end
-        ContentProducer->ContentProducer: transform
-        return
-        |||
-        alt if content==null\n||content.size!=0
-            return content
+                note over ContentProducer
+                break loop
+                end note
+            end
+        return rawContent or null
+        alt if rawContent!=null
+            ContentProducer->ContentProducer: transform
+            return
+            |||
+            alt if content
+                return content
+            end
         end
     end
-return content==null\n?0\n:content.size
+return content.read
 deactivate Application
-
 |||
 ...
 
@@ -210,16 +110,12 @@ newpage
     loop
         HttpChannel->HttpChannelState: nextAction
         alt inputState
-        else PRODUCABLE
-            note over HttpChannelState
-                PRODUCABLE->IDLE
-            end note
-            autoactivate off
-            HttpChannelState-->HttpChannel: ASYNC_READ
-            autoactivate on
-            ...
         else READY
+            note over HttpChannelState
+                READY->IDLE
+            end note
             return ASYNC_READ
+            ...
         end
         alt action
         else ASYNC_READ
@@ -244,142 +140,84 @@ newpage
 return
 |||
 
+
 Application->HttpInput: isReady
 activate Application
 HttpInput->ContentProducer: nextNon\nNullContent\n(ASYNC)
     loop for non null content
-        ContentProducer->HttpChannelState: nextContent(ASYNC)
-            loop for exiting inputState
-                alt inputState
-                else UNREADY
-                    autoactivate off
-                    HttpChannelState-->ContentProducer: null
-                    autoactivate on
-                    ...
-                else IDLE
-                    note over HttpChannelState
-                    IDLE->PRODUCING
-                    end note
-                    HttpChannelState->HttpChannel: produceContent
-                        note over HttpChannel
-                            as produceContent above
+        ContentProducer->ContentProducer: nextContent(ASYNC)
+            loop
+                ContentProducer->HttpChannel: produceContent
+                return
+                alt content==null
+                    ContentProducer->HttpChannelState: isReady
+                        note over HttpChannelState
+                        IDLE->UNREADY
                         end note
-                    return
-                    ...
-                else PRODUCING
-                    note over HttpChannelState
-                    PRODUCING->UNREADY
-                    end note
-
-                    HttpChannelState->HttpChannel: needContent
-                        note over HttpChannel
-                            as needContent above
-                        end note
-                    return
-                    ...
-                else CONTENT||READY
-                    note over HttpChannelState
-                    CONTENT||READY->IDLE
-                    end note
-                    autoactivate off
-                    HttpChannelState->ContentProducer: content
-                    deactivate HttpChannelState
-                    autoactivate on
-                    ...
+                        HttpChannelState->HttpChannel: needContent
+                        return
+                        alt needContent
+                        else true
+                            note over HttpChannelState
+                            UNREADY->IDLE
+                            end note
+                            autoactivate off
+                            HttpChannelState-->ContentProducer: true
+                            autoactivate on
+                            note over ContentProducer
+                            continue loop
+                            end note
+                            ...
+                        else false
+                            return false
+                        end
                 end
-                note over HttpChannelState
-                loop around to handle next state
-                end note
 
-             end
-            ContentProducer->ContentProducer: translate
-            return
-        alt
-        else content == null \n|| content.size()>0
-            autoactivate off
-            ContentProducer-->HttpInput: content
-            deactivate ContentProducer
-            autoactivate on
+            note over ContentProducer
+            break loop
+            end note
         end
+
+
+        return rawContent or null
+        alt if rawContent!=null
+            ContentProducer->ContentProducer: transform
+            return
+            |||
+        end
+
+        return content!=null
     end
-return content==null\n?false\n:true
+return content!=null
 deactivate Application
+|||
+...
 
 alt if content arrives
-    note right of Connection
+    note right of HttpChannel
         this may happen during isReady above or after.
-        State will probably be UNREADY, but may also
-        be IDLE or even PRODUCING in some circumstances
-        Those other states will be handled as per
-        examples above.
         The full state handling is shown below, even for
         blocking cases
     end note
-    alt implementation
-    else HTTP1
-        Connection->HttpChannel: onFillable
-        activate Connection
-            HttpChannel->HttpChannelState: onContentProducable
-                alt inputState
-                else BLOCKING
-                    note over HttpChannelState
-                    BLOCKING->IDLE
-                    woken=false
-                    end note
-                    HttpChannelState->Semaphore:release
-                    return
-                    ...
-                else UNREADY
-                    note over HttpChannelState
-                    UNREADY->PRODUCABLE
-                    woken=WAITING
-                    end note
-                    ...
-                else default
-                    note over HttpChannelState
-                    IllegalStateException
-                    end note
-                end
-            return woken
+        HttpChannel->HttpChannelState: onProducable
+            alt inputState
+            else BLOCKING
+                note over HttpChannelState
+                BLOCKING->IDLE
+                woken=false
+                end note
+                HttpChannelState->Semaphore:release
+                return
+                ...
+            else UNREADY
+                note over HttpChannelState
+                UNREADY->READY
+                woken=WAITING
+                end note
+                ...
+            end
         return woken
-        deactivate Connection
         ...
-    else HTTP2
-        Connection->HttpChannel: onData
-        activate Connection
-            HttpChannel->HttpChannelState: onContent
-                alt inputState
-                else BLOCKING
-                    note over HttpChannelState
-                    BLOCKING->CONTENT
-                    remember content
-                    woken=false
-                    end note
-                    HttpChannelState->Semaphore:release
-                    return
-                    ...
-                else UNREADY
-                    note over HttpChannelState
-                    UNREADY->READY
-                    remember content
-                    woken=WAITING
-                    end note
-                    ...
-                else CONTENT||READY
-                    note over HttpChannelState
-                    IllegalStateException
-                    end note
-                else default
-                    note over HttpChannelState
-                    ->CONTENT
-                    remember content
-                    woken=false
-                    end note
-                end
-            return woken
-        return woken
-        deactivate Connection
-    end
 end
 
 

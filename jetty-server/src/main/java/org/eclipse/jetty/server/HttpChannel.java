@@ -680,12 +680,14 @@ public abstract class HttpChannel implements Runnable, HttpOutput.Interceptor
                 request.getFields());
     }
 
-    public void produceContent()
+    public HttpInput.Content produceContent()
     {
+        throw new UnsupportedOperationException();
     }
 
-    public void needContent()
+    public boolean needContent()
     {
+        throw new UnsupportedOperationException();
     }
 
     public boolean onContent(HttpInput.Content content)

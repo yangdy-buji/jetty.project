@@ -449,11 +449,13 @@ public class HttpInput extends ServletInputStream implements Runnable
                         if (_transformedContent != _rawContent)
                             _transformedContent.succeeded();
 
+                        // TODO this is complex and nasty
                         if (_transformedContent.isLast())
                         {
                             // Always fetch fresh EOF to see any change in sentinel
                             _rawContent.succeeded();
-                            _rawContent = _transformedContent = _channelState.nextContent(Mode.POLL);
+                            _rawContent = null;
+                            _rawContent = _transformedContent = nextContent(Mode.POLL);
                             return _transformedContent;
                         }
 
@@ -473,9 +475,10 @@ public class HttpInput extends ServletInputStream implements Runnable
                             _transformedContent = null;
                         }
                         _rawContent.succeeded();
+                        _rawContent = null;
                     }
 
-                    _rawContent = _channelState.nextContent(mode);
+                    _rawContent = nextContent(mode);
 
                     if (_rawContent == null)
                     {
@@ -498,6 +501,29 @@ public class HttpInput extends ServletInputStream implements Runnable
                             initCause(e);
                         }
                     };
+                }
+            }
+        }
+
+        private Content nextContent(Mode mode) throws InterruptedException
+        {
+            while (true)
+            {
+                Content content = _channelState.getHttpChannel().produceContent();
+                if (content != null)
+                    return content;
+
+                switch (mode)
+                {
+                    case POLL:
+                        return null;
+                    case BLOCK:
+                        _channelState.blockForContent();
+                        break;
+                    case ASYNC:
+                        if (_channelState.isReady())
+                            continue;
+                        return null;
                 }
             }
         }

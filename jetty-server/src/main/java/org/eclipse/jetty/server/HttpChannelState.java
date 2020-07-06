@@ -33,7 +33,6 @@ import org.eclipse.jetty.io.QuietException;
 import org.eclipse.jetty.server.handler.ContextHandler;
 import org.eclipse.jetty.server.handler.ContextHandler.Context;
 import org.eclipse.jetty.server.handler.ErrorHandler;
-import org.eclipse.jetty.util.Callback;
 import org.eclipse.jetty.util.thread.Scheduler;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -105,40 +104,13 @@ public class HttpChannelState
 
     /*
      * The input readiness state.
-     * The input state is kept in HttpChannelState rather than in {@link HttpInput} to avoid deadlock,
-     * as HttpInput sometimes needs to check for {@link State#WAITING} and {@link #nextAction(boolean)}
-     * needs to check the InputState.*
-     *
-     *         +------->IDLE<-------+
-     *        /        //^ ^         \
-     *       /+-------+/ |  \         \
-     *      //        /  |   \         \
-     *     //        V   |    \         \
-     *    // PRODUCING---+   PRODUCABLE  +
-     *   ++ /   |        ^      ^        |
-     *   |||    |        |      |        |
-     *   |||    V        |      |        |
-     *   ||| BLOCKING----+   UNREADY     +
-     *   +++    |               |       /
-     *    \\\   |               |      /
-     *     \VV  V               V     /
-     *       CONTENT         READY---+
-     *              \       /   |
-     *               \     /    |
-     *                V   V     V
-     *                 EOF<---ALL_DATA
-     *
      */
     enum InputState
     {
-        IDLE,        // No isReady; No data
-        PRODUCING,
+        IDLE,
         BLOCKING,
-        CONTENT,
         UNREADY,
-        PRODUCABLE,
         READY,
-        EOF
     }
 
     /*
@@ -186,7 +158,6 @@ public class HttpChannelState
     private OutputState _outputState = OutputState.OPEN;
     private InputState _inputState = InputState.IDLE;
     private final Semaphore _semaphore = new Semaphore(0);
-    private HttpInput.Content _content;
 
     private boolean _initial = true;
     private boolean _sendError;
@@ -254,87 +225,101 @@ public class HttpChannelState
 
     public boolean onSetReadListener()
     {
-        // This is similar to a non-consuming version of nextContent(ASYNC)
 
-        while (true)
-        {
-            boolean unready = false;
 
-            synchronized (this)
-            {
-                if (LOG.isDebugEnabled())
-                    LOG.debug("onSetReadListenerReady() {}", this);
-
-                switch (_inputState)
-                {
-                    case IDLE:
-                        _inputState = InputState.PRODUCING;
-                        break;
-
-                    case PRODUCING:
-                        _inputState = InputState.UNREADY;
-                        unready = true;
-                        break;
-
-                    case CONTENT:
-                        _inputState = InputState.READY;
-                        if (_state == State.WAITING)
-                        {
-                            _state = State.WOKEN;
-                            return true;
-                        }
-                        return false;
-
-                    case EOF:
-                        _inputState = InputState.EOF;
-                        _content = HttpInput.AEOF;
-                        if (_state == State.WAITING)
-                        {
-                            _state = State.WOKEN;
-                            return true;
-                        }
-                        return false;
-
-                    default:
-                        throw new IllegalStateException();
-                }
-            }
-
-            if (unready)
-            {
-                _channel.needContent();
-                return false;
-            }
-            // try producing content
-            _channel.produceContent();
-        }
-    }
-
-    public boolean onContentProducable()
-    {
-        boolean woken = false;
-        boolean release = false;
         synchronized (this)
         {
             if (LOG.isDebugEnabled())
-                LOG.debug("onContentProducable {}", this);
+                LOG.debug("onSetReadListenerReady() {}", this);
+
+            // TODO, this is problematic...
+            // If we call HttpInput.isReady() then a false return is good, but a true return is
+            // not correct as it leaves us in IDLE state where a HttpChannel.handle() will not
+            // call onDataAvailable.   Perhaps we force a READY state if isReady returns true.
+            //
+            // Can't call produceContent, because nowhere to store the content if returned.
+            // We can call needContent, but on it's own it will not try a fillAndParse for h1
+            XXX;
+
+            if (_state == State.WAITING)
+            {
+                _state = State.WOKEN;
+                return true;
+            }
+            return false;
+
+        }
+    }
+
+    public void blockForContent() throws InterruptedException
+    {
+        synchronized (this)
+        {
+            if (_inputState != InputState.IDLE)
+                throw new IllegalStateException();
+            _inputState = InputState.BLOCKING;
+        }
+
+        if (_channel.needContent())
+        {
+            synchronized (this)
+            {
+                if (_inputState != InputState.BLOCKING)
+                    throw new IllegalStateException();
+                _inputState = InputState.IDLE;
+            }
+        }
+        else
+        {
+            _semaphore.acquire();
+        }
+    }
+
+    public boolean isReady()
+    {
+        synchronized (this)
+        {
+            if (_inputState != InputState.IDLE)
+                throw new IllegalStateException();
+            _inputState = InputState.UNREADY;
+        }
+
+        if (_channel.needContent())
+        {
+            synchronized (this)
+            {
+                if (_inputState != InputState.UNREADY)
+                    throw new IllegalStateException();
+                _inputState = InputState.IDLE;
+            }
+            return true;
+        }
+
+        return false;
+    }
+
+    public boolean onProducable()
+    {
+        boolean release;
+        boolean woken;
+        synchronized (this)
+        {
+            if (LOG.isDebugEnabled())
+                LOG.debug("onProducable {}", this);
             switch (_inputState)
             {
-                case IDLE:
-                    break;
-
                 case BLOCKING:
                     _inputState = InputState.IDLE;
                     release = true;
+                    woken = false;
                     break;
 
                 case UNREADY:
-                    _inputState = InputState.PRODUCABLE;
-                    if (_state == State.WAITING)
-                    {
+                    _inputState = InputState.READY;
+                    release = false;
+                    woken = _state == State.WAITING;
+                    if (woken)
                         _state = State.WOKEN;
-                        woken = true;
-                    }
                     break;
 
                 default:
@@ -348,248 +333,7 @@ public class HttpChannelState
 
     public boolean onEof(boolean early)
     {
-        boolean woken = false;
-        boolean release = false;
-        Callback callback = null;
-        Throwable error = null;
-        synchronized (this)
-        {
-            if (LOG.isDebugEnabled())
-                LOG.debug("onEof e={} {}", early, this);
-
-            switch (_inputState)
-            {
-                case BLOCKING:
-                    _inputState = InputState.CONTENT;
-                    _content = early ? new HttpInput.EarlyEofErrorContent() : HttpInput.EOF;
-                    release = true;
-                    break;
-
-                case UNREADY:
-                    _inputState = InputState.READY;
-                    _content = early ? new HttpInput.EarlyEofErrorContent() : HttpInput.AEOF;
-                    if (_state == State.WAITING)
-                    {
-                        _state = State.WOKEN;
-                        woken = true;
-                    }
-                    break;
-
-                case IDLE:
-                case PRODUCING:
-                    _inputState = InputState.CONTENT;
-                    _content = early
-                        ? new HttpInput.EarlyEofErrorContent()
-                        : (_channel.getRequest().getHttpInput().isAsyncIO() ? HttpInput.AEOF : HttpInput.EOF);
-                    break;
-
-                case CONTENT:
-                case READY:
-                    if (early)
-                    {
-                        HttpInput.EarlyEofErrorContent earlyEof = new HttpInput.EarlyEofErrorContent();
-                        callback = _content;
-                        error = earlyEof._error;
-                        _content = earlyEof;
-                    }
-                    else
-                    {
-                        _content = new HttpInput.LastContent(_content);
-                    }
-                    break;
-
-                default:
-                    throw new IllegalStateException();
-            }
-        }
-
-        if (release)
-            _semaphore.release();
-
-        if (callback != null)
-        {
-            if (error == null)
-                callback.succeeded();
-            else
-                callback.failed(error);
-        }
-        return woken;
-
-    }
-
-    public boolean onContent(HttpInput.Content content)
-    {
-        boolean woken = false;
-        boolean release = false;
-        Callback callback = null;
-        Throwable error = null;
-        synchronized (this)
-        {
-            if (LOG.isDebugEnabled())
-                LOG.debug("onContent c={} {}", content, this);
-
-            switch (_inputState)
-            {
-                case BLOCKING:
-                    _inputState = InputState.CONTENT;
-                    _content = content;
-                    release = true;
-                    break;
-
-                case UNREADY:
-                    _inputState = InputState.READY;
-                    _content = content;
-                    if (_state == State.WAITING)
-                    {
-                        _state = State.WOKEN;
-                        woken = true;
-                    }
-                    break;
-
-                case IDLE:
-                case PRODUCABLE:
-                case PRODUCING:
-                    _inputState = InputState.CONTENT;
-                    _content = content;
-                    break;
-
-                case EOF:
-                    if (!content.isLast())
-                        throw new IllegalStateException();
-                    if (_content != content)
-                        callback = _content;
-                    _content = content;
-                    break;
-
-                case CONTENT:
-                case READY:
-                    if (_content.hasContent())
-                        throw new IllegalStateException();
-                    if (_content.isLast() && !content.isLast())
-                        throw new IllegalStateException();
-
-                    Throwable contentError = content.getError();
-                    if (contentError != null)
-                    {
-                        Throwable existingErrorContent = _content.getError();
-                        if (existingErrorContent == null)
-                        {
-                            callback = _content;
-                            error = contentError;
-                            _content = content;
-                        }
-                        else if (existingErrorContent != contentError)
-                        {
-                            existingErrorContent.addSuppressed(contentError);
-                        }
-                        break;
-                    }
-                    if (_content != content)
-                        callback = content;
-                    _content = content;
-                    break;
-
-                default:
-                    throw new IllegalStateException();
-            }
-        }
-
-        try
-        {
-            if (callback != null)
-            {
-                if (error == null)
-                    callback.succeeded();
-                else
-                    callback.failed(error);
-            }
-        }
-        finally
-        {
-            if (release)
-                _semaphore.release();
-        }
-        return woken;
-    }
-
-    HttpInput.Content nextContent(Mode mode) throws InterruptedException
-    {
-        while (true)
-        {
-            boolean produce = false;
-            boolean need = false;
-            boolean acquire = false;
-
-            synchronized (this)
-            {
-                if (LOG.isDebugEnabled())
-                    LOG.debug("nextContent({}) {}", mode, this);
-
-                switch (_inputState)
-                {
-                    case EOF:
-                        return _content;
-
-                    case IDLE:
-                        produce = true;
-                        _inputState = InputState.PRODUCING;
-                        break;
-
-                    case PRODUCING:
-                        switch (mode)
-                        {
-                            case BLOCK:
-                                _inputState = InputState.BLOCKING;
-                                need = true;
-                                acquire = true;
-                                break;
-                            case POLL:
-                                _inputState = InputState.IDLE;
-                                return null;
-                            case ASYNC:
-                                _inputState = InputState.UNREADY;
-                                need = true;
-                                break;
-                        }
-                        break;
-
-                    case UNREADY:
-                    case PRODUCABLE:
-                        return null;
-
-                    case CONTENT:
-                    case READY:
-                        HttpInput.Content content = _content;
-                        if (_content.isLast())
-                        {
-                            if (_content.getError() == null)
-                                _content = _channel.getRequest().getHttpInput().isAsyncIO() ? HttpInput.AEOF : HttpInput.EOF;
-                            _inputState = InputState.EOF;
-                        }
-                        else
-                        {
-                            _content = null;
-                            _inputState = InputState.IDLE;
-                        }
-                        if (LOG.isDebugEnabled())
-                            LOG.debug("nextContent({}) c={}", mode, content);
-                        return content;
-
-                    default:
-                        throw new IllegalStateException();
-                }
-
-                if (LOG.isDebugEnabled())
-                    LOG.debug("nextContent({}) is={} p={} n={} a={}", mode, _inputState, produce, need, acquire);
-            }
-
-            if (produce)
-                _channel.produceContent();
-            if (need)
-                _channel.needContent();
-            if (acquire)
-                _semaphore.acquire();
-        }
+        // TODO
     }
 
     public void setTimeout(long ms)
@@ -635,12 +379,11 @@ public class HttpChannelState
 
     private String getStatusStringLocked()
     {
-        return String.format("s=%s rs=%s os=%s is=%s c=%s awp=%b se=%b i=%b al=%d",
+        return String.format("s=%s rs=%s os=%s is=%s awp=%b se=%b i=%b al=%d",
             _state,
             _requestState,
             _outputState,
             _inputState,
-            _content,
             _asyncWritePossible,
             _sendError,
             _initial,
@@ -843,19 +586,10 @@ public class HttpChannelState
                 return Action.COMPLETE;
 
             case ASYNC:
-                switch (_inputState)
+                if (_inputState == InputState.READY)
                 {
-                    case PRODUCABLE:
-                        _inputState = InputState.IDLE;
-                        return Action.READ_CALLBACK;
-                    case READY:
-                        return Action.READ_CALLBACK;
-                    case EOF:
-                        if (_content == HttpInput.AEOF || _content.getError() != null)
-                            return Action.READ_CALLBACK;
-                        break;
-                    default:
-                        break;
+                    _inputState = InputState.IDLE;
+                    return Action.READ_CALLBACK;
                 }
 
                 if (_asyncWritePossible)

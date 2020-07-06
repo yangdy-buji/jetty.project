@@ -1,0 +1,188 @@
+@startuml
+title "HttpChannel"
+
+participant Connection as "\nConnection\n"
+participant HttpChannel as "Http\nChannel\n"
+participant HttpChannelState as "Http\nChannel\nState"
+participant ContentProducer as "Content\nProducer\n"
+participant HttpInput as "Http\nInput\n"
+
+autoactivate on
+
+== HTTP1 ==
+ContentProducer->HttpChannel: produceContent
+    loop
+        alt state
+        else IDLE
+            activate ContentProducer
+            note over HttpChannel
+            IDLE->PRODUCING
+            end note
+            HttpChannel->Connection: parseAndFill
+                alt if content
+                    Connection->HttpChannel: onContent
+                        note over HttpChannel
+                        PRODUCING->CONTENT
+                        remember content
+                        end note
+                    return
+                end
+            return
+            ...
+        else PRODUCING
+            note over HttpChannel
+            PRODUCING->IDLE
+            end note
+            autoactivate off
+            HttpChannel-->ContentProducer: null
+            autoactivate on
+            ...
+        else CONTENT
+            note over HttpChannel
+            CONTENT->IDLE|EOF
+            end note
+            autoactivate off
+            HttpChannel-->ContentProducer: content
+            autoactivate on
+            ...
+        else REGISTERED
+            autoactivate off
+            HttpChannel-->ContentProducer: null
+            autoactivate on
+            ...
+        else EOF
+            return EOF
+        end
+    end
+...
+ContentProducer->HttpChannel: needContent
+    alt state
+    else IDLE
+        note over HttpChannel
+        IDLE->REGISTERED
+        end note
+        HttpChannel->Connection: fillInterested
+        return
+        autoactivate off
+        HttpChannel-->ContentProducer: false
+        autoactivate on
+        ...
+    else REGISTERED
+        autoactivate off
+        HttpChannel-->ContentProducer: false
+        autoactivate on
+        ...
+    else EOF
+        return true
+        deactivate ContentProducer
+        ...
+    end
+
+
+[->Connection: onFillable
+    Connection->HttpChannel: callback
+        note over HttpChannel
+        REGISTERED->IDLE
+        end note
+        HttpChannel->HttpChannelState:onProducable
+        return woken
+        alt if woken
+            HttpChannel->Connection:execute
+            return
+        end
+    return
+return
+|||
+...
+
+== HTTP2 ==
+ContentProducer->HttpChannel: produceContent
+    activate ContentProducer
+    loop
+        alt state
+        else IDLE
+            note over HttpChannel
+            IDLE->DEMANDING
+            end note
+            HttpChannel->Connection:demand(1)
+            alt
+                Connection->HttpChannel:onData
+                    note over HttpChannel
+                    DEMANDING->CONTENT
+                    remember content
+                    end note
+                return
+            end
+            return
+            ...
+        else DEMANDING
+            autoactivate off
+            HttpChannel-->ContentProducer: null
+            autoactivate on
+            ...
+        else CONTENT
+            note over HttpChannel
+            CONTENT->IDLE|EOF
+            end note
+            autoactivate off
+            HttpChannel-->ContentProducer: content
+            autoactivate on
+            ...
+        else EOF
+
+            return EOF
+        end
+    end
+...
+ContentProducer->HttpChannel: needContent
+    loop
+        alt state
+        else IDLE
+            note over HttpChannel
+            IDLE->DEMANDING
+            end note
+            HttpChannel->Connection:demand(1)
+            alt
+                Connection->HttpChannel:onData
+                    note over HttpChannel
+                    DEMANDING->CONTENT
+                    remember content
+                    end note
+                return
+            end
+            return
+            ...
+        else DEMANDING
+            autoactivate off
+            HttpChannel-->ContentProducer: false
+            autoactivate on
+            ...
+        else CONTENT
+            autoactivate off
+            HttpChannel-->ContentProducer: true
+            autoactivate on
+            ...
+        else EOF
+            return true
+        end
+    end
+
+deactivate ContentProducer
+
+[->Connection: onDataFrame
+    Connection->HttpChannel: onData
+        note over HttpChannel
+        DEMANDING->CONTENT
+        end note
+        HttpChannel->HttpChannelState:onProducable
+        return woken
+        alt if woken
+            HttpChannel->Connection:execute
+            return
+        end
+    return
+return
+
+
+
+@enduml

@@ -1,36 +1,18 @@
 @startuml
 
 IDLE:
-PRODUCING:
 BLOCKING:
-CONTENT:
 UNREADY:
-PRODUCABLE:
-READY:
-EOF:
 
 [*] --> IDLE
 
-IDLE --> CONTENT : onContent
-IDLE --> PRODUCING : produce
+IDLE --> BLOCKING : BLOCK
+IDLE --> UNREADY : ASYNC
 
-PRODUCING --> CONTENT : onContent
-PRODUCING -right-> IDLE : POLL
-PRODUCING --> BLOCKING : BLOCK
-PRODUCING --> UNREADY : ASYNC
+BLOCKING -up-> IDLE : onProducable
 
-CONTENT -left-> IDLE : return content
-CONTENT --> EOF : return EOF or Error
+UNREADY -up-> READY : onProducable
 
-BLOCKING --> CONTENT : onContent
-BLOCKING -up-> IDLE : onContentProducable
-
-UNREADY --> READY : onContent
-UNREADY -up-> PRODUCABLE : onContentProducable
-
-PRODUCABLE -left->IDLE : nextAction
-
-READY -up-> IDLE : return content
-READY --> EOF : return EOF or Error
+READY -left->IDLE : nextAction
 
 @enduml
