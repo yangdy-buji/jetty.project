@@ -680,22 +680,16 @@ public abstract class HttpChannel implements Runnable, HttpOutput.Interceptor
                 request.getFields());
     }
 
+    // TODO javadoc
     public HttpInput.Content produceContent()
     {
         throw new UnsupportedOperationException();
     }
 
+    // TODO javadoc
     public boolean needContent()
     {
         throw new UnsupportedOperationException();
-    }
-
-    public boolean onContent(HttpInput.Content content)
-    {
-        if (LOG.isDebugEnabled())
-            LOG.debug("onContent {} {}", this, content);
-        _combinedListener.onRequestContent(_request, content.getByteBuffer());
-        return _state.onContent(content);
     }
 
     public boolean onContentComplete()

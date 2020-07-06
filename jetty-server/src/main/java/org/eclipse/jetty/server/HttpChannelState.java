@@ -275,7 +275,7 @@ public class HttpChannelState
         }
     }
 
-    public boolean isReady()
+    public boolean isProduceContentReady()
     {
         synchronized (this)
         {
@@ -298,7 +298,7 @@ public class HttpChannelState
         return false;
     }
 
-    public boolean onProducable()
+    public boolean onProducible()
     {
         boolean release;
         boolean woken;

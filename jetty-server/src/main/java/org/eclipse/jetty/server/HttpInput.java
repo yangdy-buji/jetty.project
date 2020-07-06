@@ -150,6 +150,7 @@ public class HttpInput extends ServletInputStream implements Runnable
 
     public boolean onContentError(Throwable x)
     {
+        // TODO don't do this from here.
         if (LOG.isDebugEnabled())
         {
             x.addSuppressed(new Throwable());
@@ -517,13 +518,15 @@ public class HttpInput extends ServletInputStream implements Runnable
                 {
                     case POLL:
                         return null;
+
                     case BLOCK:
                         _channelState.blockForContent();
                         break;
+
                     case ASYNC:
-                        if (_channelState.isReady())
-                            continue;
-                        return null;
+                        if (!_channelState.isProduceContentReady())
+                            return null;
+                        break;
                 }
             }
         }
