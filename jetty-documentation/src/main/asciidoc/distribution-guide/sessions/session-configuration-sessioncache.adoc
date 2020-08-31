@@ -17,14 +17,17 @@
 //
 
 [[session-configuration-sessioncache]]
-=== The L1 Session Cache
+=== Session Cache Alternatives
 
-==== The DefaultSessionCache
+==== The Default: Sessions Cached in Memory
 
-In the absence of any explicit configuration, Jetty will instantiate an instance of the `DefaultSessionCache` per context.
-If you wish to change any of the default values, you need to enable the `session-cache-hash` link:#startup-modules[module].
+In the absence of any explicit configuration or module selection, Jetty will instantiate an instance of the `DefaultSessionCache` per context.
+This will provide an L1 cache of session objects in memory.
 
-Once the `session-cache-hash` module has been enabled, you can view a list of all the configurable values by opening `start.d/session-cache-hash.ini`:
+If you wish to change any of the default configuration values you should enable the `session-cache-hash` link:#startup-modules[module].
+The name `hash` harks back to historical jetty session implementations, whereby sessions were kept in memory using a HashMap.
+
+After you have enabled the `session-cache-hash` module, you can view a list of all the configurable values by opening `start.d/session-cache-hash.ini`:
 
 [source, screen, subs="{sub-order}"]
 ----
@@ -35,6 +38,7 @@ Once the `session-cache-hash` module has been enabled, you can view a list of al
 #jetty.session.saveOnCreate=false
 #jetty.session.removeUnloadableSessions=false
 #jetty.session.flushOnResponseCommit=false
+#jetty.session.invalidateOnShutdown=false
 ----
 
 jetty.session.evictionPolicy::
@@ -54,7 +58,7 @@ ____
 
 jetty.session.saveOnInactiveEvict::
 Boolean, default `false`.
-Controls whether a session will be saved to the `SessionDataStore` just prior to its eviction.
+Controls whether a session will be persisted to the `SessionDataStore` just prior to its eviction.
 
 jetty.session.saveOnCreate::
 Boolean, default `false`.
@@ -62,7 +66,7 @@ Controls whether a session that is newly created will be immediately saved to th
 
 jetty.session.removeUnloadableSessions::
 Boolean, default `false`.
-Controls whether a session that cannot be restored - for example because it is corrupted - from the `SessionDataStore` is deleted by the `SessionDataStore`.
+Controls whether the session cache should ask a `SessionDataStore` to delete a session that cannot be restored - for example because it is corrupted.
 
 jetty.session.flushOnResponseCommit::
 Boolean, default `false`.
@@ -70,14 +74,16 @@ If true, if a session is "dirty" - ie its attributes have changed - it will be w
 This ensures that all subsequent requests whether to the same or different node will see the updated session data.
 If false, a dirty session will only be written to the backing store when the last simultaneous request for it leaves the session.
 
-For more general information on the uses of these configuration properties, see link:#sessions-details[Session Components].
+jetty.session.invalidateOnShutdown::
+Boolean, default `false`.
+If true, when a context is shutdown, all sessions in the cache are invalidated and deleted both from the cache and from the `SessionDataStore`.
 
 
-==== The NullSessionCache
+==== The Alternative: No Session Caching
 
-The `NullSessionCache` is a trivial implementation of the `SessionCache` that does not cache any session information.
+The `NullSessionCache` is a trivial cache that does not actually cache any session information.
 You may need to use it if your clustering setup does not have a sticky load balancer, or if you want absolutely minimal support for sessions.
-If you use this in conjunction with the `NullSessionDataStore`, then sessions will neither be retained in memory nor persisted.
+If you use this in conjunction with the `NullSessionDataStore`, then sessions will _neither_ be retained in memory _nor_ persisted.
 
 To enable the `NullSessionCache`, enable the `sesssion-cache-null` link:#startup-modules[module]. 
 Configuration options are:
@@ -88,7 +94,7 @@ Controls whether a session that is newly created will be immediately saved to th
 
 jetty.session.removeUnloadableSessions::
 Boolean, default `false`.
-Controls whether a session that cannot be restored - for example because it is corrupted - from the `SessionDataStore` is deleted by the `SessionDataStore`.
+Controls whether the session cache should ask a `SessionDataStore` to delete a session that cannot be restored - for example because it is corrupted.
 
 jetty.session.flushOnResponseCommit::
 Boolean, default `false`.
@@ -96,4 +102,3 @@ If true, if a session is "dirty" - ie its attributes have changed - it will be w
 This ensures that all subsequent requests whether to the same or different node will see the updated session data.
 If false, a dirty session will only be written to the backing store when the last simultaneous request for it leaves the session.
 
-For more general information on the uses of these configuration properties, see link:#sessions-details[Session Components].

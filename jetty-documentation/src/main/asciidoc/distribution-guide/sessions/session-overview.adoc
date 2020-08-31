@@ -1,0 +1,52 @@
+//
+// ========================================================================
+// Copyright (c) 1995-2020 Mort Bay Consulting Pty Ltd and others.
+//
+// This program and the accompanying materials are made available under
+// the terms of the Eclipse Public License 2.0 which is available at
+// https://www.eclipse.org/legal/epl-2.0
+//
+// This Source Code may also be made available under the following
+// Secondary Licenses when the conditions for such availability set
+// forth in the Eclipse Public License, v. 2.0 are satisfied:
+// the Apache License v2.0 which is available at
+// https://www.apache.org/licenses/LICENSE-2.0
+//
+// SPDX-License-Identifier: EPL-2.0 OR Apache-2.0
+// ========================================================================
+//
+
+[[jetty-sessions-architecture]]
+
+=== Session Overview
+
+==== Terminology 
+
+Before diving into the specifics of how to plug-in and configure various alternative session modules, let's review some useful terminology:
+
+SessionIdManager:: Each jetty instance can have a single SessionIdManager that is responsible for managing session ids.
+HouseKeeper:: Each jetty instance can have a single HouseKeeper that is responsible for finding and orchestrating the removal of expired sessions.
+SessionCache:: Each context can have a single SessionCache, that caches in-use session objects.
+SessionDataStore:: Each context can have a single SessionDataStore that is responsible for all persistence operations on sessions.
+SessionHandler:: Each context can have a single SessionHandler that is responsible for managing the usage and lifecycle of sessions.
+
+==== Jetty Session Modules
+
+There are a number of modules that offer pluggable alternatives for session management.
+
+You might like to consult the [use-cases] to help you decide which to select.
+
+
+cache alternatives
+session-cache-hash.mod
+session-cache-null.mod
+
+store alternatives
+Files
+Relational Database
+NoSQL Database
+GCloud
+Hazelcast
+Infinispan
+
+
