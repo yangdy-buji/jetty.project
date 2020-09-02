@@ -18,39 +18,36 @@
 
 [[session-configuration-housekeeper]]
 === The Base Sessions Module
-Use the link:#startup-modules[module system] to link:#startup-modules[enable] the `sessions` module.
+The `sessions` module is the base module that all other session modules depends upon.
+As such it will be _transitively_ enabled if you enable any of the other session modules: you need to _explicitly_ enable it if you wish to _change_ any settings from their defaults.
 
-This will enable the `$jetty.home/etc/sessions/id-manager.xml` file and generate a `$jetty.base/start.d/sessions.ini` file.
+Enabling the `sessions` module puts the `$jetty.home/etc/sessions/id-manager.xml` file onto the execution path and generates a `$jetty.base/start.d/sessions.ini` file.
 
-The `id-manager.xml` file instantiates a single `SessionIdManager` and `HouseKeeper` and configures them using the properties from the `sessions.ini` file.
+The `id-manager.xml` file instantiates a `DefaultSessionIdManager` and `HouseKeeper`.
+The former is used to generate and manage session ids whilst the latter is responsible for periodic scavenging of expired sessions.
 
-Note that this module will be _transitively_ enabled if you only enable any of the other session modules: you need to _explicitly_ enable it if you wish to _change_ any settings from their defaults.
+The `sessions.ini` file can be used to configure them.
 
 [[session-idmanager-housekeeper-config]]
 ==== Configuration
-Edit the `sessions.ini` file to change the following properties:
 
 jetty.sessionIdManager.workerName::
 This uniquely identifies the jetty server instance within a cluster.
 If you have more than one Jetty instance, it is *crucial* that you configure the worker name differently on each jetty instance.
-You can either provide a value for this property, or you can allow jetty to try and synthesize an workerName - the latter option is _only_ advisable in the case of a single, non-clustered deployment.
-There are two ways jetty will try to synthesize a default workerName:
+You can either provide a value for this property, or you can allow jetty to try and synthesize a workerName - the latter option is _only_ advisable in the case of a single, non-clustered deployment.
+There are two ways jetty will try to synthesize a default `workerName`:
 
-* if running on GoogleAppEngine, the workerName will be formed by concatenating the values of the environment variables `JETTY_WORKER_INSTANCE` and `GAE_MODULE_INSTANCE`
-* otherwise, the workerName will be formed by concatenating the environment variable `JETTY_WORKER_INSTANCE` and the literal `0`.
+* if running on GoogleAppEngine, the `workerName` will be formed by concatenating the values of the environment variables `JETTY_WORKER_INSTANCE` and `GAE_MODULE_INSTANCE`
+* otherwise, the `workerName` will be formed by concatenating the environment variable `JETTY_WORKER_INSTANCE` and the literal `0`.
 
 
 jetty.sessionScavengeInterval.seconds::
-This is the period in _seconds_ between runs of the `HouseKeeper`, responsible for orchestrating the finding and removal of expired sessions.
+This is the period in _seconds_ between runs of the `HouseKeeper`, responsible for orchestrating the removal of expired sessions.
 By default it will run every 600 secs (ie 10 mins).
 As a rule of thumb, you should  ensure that the scavenge interval is shorter than the  `<session-timeout>` of your sessions to ensure that they are promptly scavenged.
-Use the link:#startup-modules[module system] to link:#startup-modules[enable] the `sessions` module.
 
-This will enable the `$jetty.home/etc/sessions/id-manager.xml` file and generate a `$jetty.base/start.d/sessions.ini` file.
-
-The `id-manager.xml` file instantiates a single `DefaultSessionIdManager` and `HouseKeeper` and configures them using the properties from the `sessions.ini` file.
 ____
 [TIP]
-Don't forget that the `<session-timeout>` is specified in web.xml in _minutes_ and the vaue of the jetty.sessionScavengeInterval.seconds is in _seconds_.
+Don't forget that the `<session-timeout>` is specified in web.xml in _minutes_ and the vaue of the `jetty.sessionScavengeInterval.seconds` is in _seconds_.
 ____
 

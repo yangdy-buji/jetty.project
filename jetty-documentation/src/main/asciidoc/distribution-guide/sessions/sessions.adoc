@@ -25,7 +25,6 @@ Choosing the correct session manager implementation is an important consideratio
 include::session-overview.adoc[]
 include::session-configuration-base.adoc[]
 include::session-configuration-sessioncache.adoc[]
-include::session-configuration-memory.adoc[]
 include::session-configuration-file-system.adoc[]
 include::session-configuration-jdbc.adoc[]
 include::session-configuration-mongodb.adoc[]

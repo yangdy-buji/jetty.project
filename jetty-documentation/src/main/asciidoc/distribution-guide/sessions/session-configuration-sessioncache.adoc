@@ -19,27 +19,20 @@
 [[session-configuration-sessioncache]]
 === Session Cache Alternatives
 
-==== The Default: Sessions Cached in Memory
+In this section we will look at the alternatives for the `SessionCache`, ie the L1 cache of in-use session objects.
+Jetty ships with two alternatives: an in-memory cache, and a null cache.
+The latter does not actually do any caching of sessions, and can be useful if you either want to minimize your support for sessions, or you are in a clustered deployment without a sticky loadbalancer.
+The [use-cases] go into more detail on these scenarios.
 
-In the absence of any explicit configuration or module selection, Jetty will instantiate an instance of the `DefaultSessionCache` per context.
-This will provide an L1 cache of session objects in memory.
+==== Sessions Cached in Memory
 
 If you wish to change any of the default configuration values you should enable the `session-cache-hash` link:#startup-modules[module].
 The name `hash` harks back to historical jetty session implementations, whereby sessions were kept in memory using a HashMap.
 
-After you have enabled the `session-cache-hash` module, you can view a list of all the configurable values by opening `start.d/session-cache-hash.ini`:
+After you have enabled the `session-cache-hash` module, the `$jetty.base/start.d/session-cache-hash.ini` will be generated.
+Edit this file to change the properties that control the behaviour of the cache.
 
-[source, screen, subs="{sub-order}"]
-----
---module=session-cache-hash
-
-#jetty.session.evictionPolicy=-1
-#jetty.session.saveOnInactiveEvict=false
-#jetty.session.saveOnCreate=false
-#jetty.session.removeUnloadableSessions=false
-#jetty.session.flushOnResponseCommit=false
-#jetty.session.invalidateOnShutdown=false
-----
+===== Configuration
 
 jetty.session.evictionPolicy::
 Integer.
@@ -53,7 +46,7 @@ Values are:
 
 ____
 [NOTE]
-If you are not using a `SessionDataStore` that persists sessions, be aware that evicted sessions will be lost.
+If you are not using one of the session persistence modules, ie one of the `session-store-xxxx.mod`s, then sessions will be lost when the context is stopped.
 ____
 
 jetty.session.saveOnInactiveEvict::
@@ -79,14 +72,12 @@ Boolean, default `false`.
 If true, when a context is shutdown, all sessions in the cache are invalidated and deleted both from the cache and from the `SessionDataStore`.
 
 
-==== The Alternative: No Session Caching
+==== Sessions Not Cached
 
-The `NullSessionCache` is a trivial cache that does not actually cache any session information.
-You may need to use it if your clustering setup does not have a sticky load balancer, or if you want absolutely minimal support for sessions.
-If you use this in conjunction with the `NullSessionDataStore`, then sessions will _neither_ be retained in memory _nor_ persisted.
+You may need to use the `session-cache-null.mod` if your clustering setup does not have a sticky load balancer, or if you want absolutely minimal support for sessions.
+If you enable this module, but you don't enable a module that provides session persistence (ie one of the `session-store-xxx.mod` modules), then sessions will _neither_ be retained in memory _nor_ persisted.
 
-To enable the `NullSessionCache`, enable the `sesssion-cache-null` link:#startup-modules[module]. 
-Configuration options are:
+===== Configuration
 
 jetty.session.saveOnCreate::
 Boolean, default `false`.
@@ -101,4 +92,3 @@ Boolean, default `false`.
 If true, if a session is "dirty" - ie its attributes have changed - it will be written to the backing store as the response is about to commit.
 This ensures that all subsequent requests whether to the same or different node will see the updated session data.
 If false, a dirty session will only be written to the backing store when the last simultaneous request for it leaves the session.
-
