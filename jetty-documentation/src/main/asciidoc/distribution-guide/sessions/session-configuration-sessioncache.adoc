@@ -17,11 +17,12 @@
 //
 
 [[session-configuration-sessioncache]]
-=== Session Cache Alternatives
+=== SessionCache Alternatives
 
 In this section we will look at the alternatives for the `SessionCache`, ie the L1 cache of in-use session objects.
 Jetty ships with two alternatives: an in-memory cache, and a null cache.
 The latter does not actually do any caching of sessions, and can be useful if you either want to minimize your support for sessions, or you are in a clustered deployment without a sticky loadbalancer.
+
 The [use-cases] go into more detail on these scenarios.
 
 ==== Sessions Cached in Memory

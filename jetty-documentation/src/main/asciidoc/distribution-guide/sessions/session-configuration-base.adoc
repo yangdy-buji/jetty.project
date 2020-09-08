@@ -48,6 +48,7 @@ As a rule of thumb, you should  ensure that the scavenge interval is shorter tha
 
 ____
 [TIP]
+
 Don't forget that the `<session-timeout>` is specified in web.xml in _minutes_ and the vaue of the `jetty.sessionScavengeInterval.seconds` is in _seconds_.
 ____
 

@@ -20,9 +20,15 @@
 
 === Persistent Sessions: File System
 
-Note: Persisting sessions to the local file system should *not* be used in a clustered environment.
+The `session-store-file` module supports persistent storage of session data in a filesystem.
 
-==== Enabling File System Sessions
+____
+[NOTE]
+
+Persisting sessions to the local file system should *never* be used in a clustered environment.
+____
+
+==== Enabling File System Session Storage
 
 When using the Jetty distribution, you will first need to enable the `session-store-file` link:#startup-modules[module] for your link:#startup-base-and-home[Jetty base] using the `--add-to-start` argument on the command line.
 
@@ -39,51 +45,55 @@ MKDIR : ${jetty.base}/sessions
 INFO  : Base directory was modified
 ----
 
-Doing this enables the File System Session module and any dependent modules or files needed for it to run on the server.
+Doing this enables this and any dependent modules or files needed for it to run on the server.
 The example above is using a fresh `${jetty.base}` with nothing else enabled.
 
-When the `--add-to-start` argument was added to the command line, it enabled the the `session-store-file` module as well as the `sessions` and `server` modules, which are required for the File System session management to operate.
-Additionally a `${jetty.base}/sessions` directory was created.
-By default Session files will be saved to this directory.
+Enabling this module also creates the `${jetty.base}/sessions` directory.
+By default session data will be saved to this directory, one file representing each session.
 
-In addition to adding these modules to the classpath of the server, several ini configuration files were added to the `${jetty.base}/start.d` directory.
+File names follow this pattern:
 
-____
-[NOTE]
-Session data is now only loaded when requested.
-Previous functionality such as `setLazyLoad` has been removed.
-____
++[expiry]_[context]_[id]+
 
-==== Configuring File System Session Properties
+expiry::
+This is the expiry time in milliseconds since the epoch.
+context::
+This is a string representation of the context to which the session is scoped.
+It is comprised of the (sanitised) context path and the virtual host:
++[contextpath]_[virtualhost]+
+  contextpath:::
+  This is the context path with any special characters, including `/`, replaced by the `_` underscore character.
+  For example, a context path of `/catalog` would become `_catalog`.
+  A context path of simply `/` becomes just `__`.
+  virtualhost:::
+  This is the first virtual host associated with the context and has the form of 4 digits separated by `.` characters.
+  If there are no virtual hosts associated with a context, then `0.0.0.0` is used:
+  [digit].[digit].[digit].[digit]
+id::
+This is the unique id of the session.
 
-Opening `start.d/session-store-file.ini` will show a list of all the configurable options for the file system session module:
+Putting all of the above together as an example, a session with an id of `node0ek3vx7x2y1e7pmi3z00uqj1k0` for the context with path `/test` with no virtual hosts and an expiry of `1599558193150` would have a file name of:
 
-[source, screen, subs="{sub-order}"]
-----
-# ---------------------------------------
-# Module: session-store-file
-# Enables session persistent storage in files.
-# ---------------------------------------
---module=session-store-file
+`1599558193150__test_0.0.0.0_node0ek3vx7x2y1e7pmi3z00uqj1k0`
 
-jetty.session.file.storeDir=${jetty.base}/sessions
-#jetty.session.file.deleteUnrestorableFiles=false
-#jetty.session.savePeriod.seconds=0
-----
+
+==== Configuring
+
+The `$jetty.base/start.d/sessions.ini` file contains the following properties which may be modified to customise filesystem session storage:
 
 jetty.session.storeDir::
-This defines the location for storage of Session files.
+Filesystem path.
+The default is `${jetty.base}/sessions`.
+This defines the location for storage of session files.
+
 jetty.session.file.deleteUnrestorableFiles::
 Boolean.
-If set to true, unreadable files will be deleted: this is useful to prevent repeated logging of the same error when the scavenger periodically (re-) attempts to load the corrupted information for a session in order to expire it.
-jetty.session.savePeriod.seconds=0::
-By default whenever the last concurrent request leaves a session, that session is always persisted via the `SessionDataStore`, even if the only thing that changed on the session is its updated last access time.
-A non-zero value means that the `SessionDataStore` will skip persisting the session if only the access time changed, and it has been less than `savePeriod` seconds since the last time the session was written.
-+
-____
-[NOTE]
-Configuring `savePeriod` is useful if your persistence technology is very slow/costly for writes.
-In a clustered environment, there is a risk of the last access time of the session being out-of-date in the shared store for up to `savePeriod` seconds.
-This allows the possibility that a node may prematurely expire the session, even though it is in use by another node.
-Thorough consideration of the `maxIdleTime` of the session when setting the `savePeriod` is imperative - there is no point in setting a `savePeriod` that is larger than the `maxIdleTime`.
-____
+Default is `false`.
+If set to `true`, unreadable files will be deleted.
+This is useful to prevent repeated logging of the same error when the scavenger periodically (re-)attempts to load the corrupted information for a session in order to expire it.
+
+jetty.session.savePeriod.seconds::
+Integer.
+Default is `0`.
+By default whenever the last concurrent request leaves a session, that session is always persisted, even if the only thing that changed on the session is its updated last access time.
+A non-zero value means that jetty will skip persisting the session if only the access time changed, unless the time since the last save exceeds the value of this property.

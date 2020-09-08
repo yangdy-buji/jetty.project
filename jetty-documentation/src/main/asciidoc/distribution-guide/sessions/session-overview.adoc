@@ -24,12 +24,14 @@
 
 Before diving into the specifics of how to plug-in and configure various alternative http session management modules, let's review some useful terminology:
 
-SessionIdManager:: Each jetty instance can have a single SessionIdManager that is responsible for managing session ids.
-HouseKeeper:: Each jetty instance can have a single HouseKeeper that is responsible for finding and orchestrating the removal of expired sessions.
-SessionCache:: Each context can have a single SessionCache that is an L1 cache of in-use session objects.
-SessionDataStore:: Each context can have a single SessionDataStore that is responsible for all persistence operations on sessions.
-CachingSessionDataStore:: Each context can have a single CachingSessionDataStore that is an L2 cache of session data.
-SessionHandler:: Each context can have a single SessionHandler that is responsible for managing the lifecycle of sessions.
+SessionIdManager:: A jetty instance can have a single SessionIdManager that is responsible for managing session ids.
+HouseKeeper:: A jetty instance can have a single HouseKeeper that is responsible for finding and orchestrating the removal of expired sessions.
+SessionCache:: A context can have a single SessionCache that is an L1 cache of in-use session objects.
+SessionDataStore:: A context can have a single SessionDataStore that is responsible for all persistence operations on sessions.
+CachingSessionDataStore:: A context can have a single CachingSessionDataStore that is an L2 cache of session data.
+SessionHandler:: A context can have a single SessionHandler that is responsible for managing the lifecycle of sessions.
+
+More details on these concepts can be found in the [Programming Guide].
 
 ==== Jetty Session Modules
 
@@ -40,16 +42,18 @@ For example, jetty ships with two alternative implementations of the `SessionCac
 
 There are at least six alternative implementations of the `SessionDataStore` that you can use to persist your http sessions.
 The list current includes support for:
+
 * file system storage (`session-store-file.mod`)
-* relational database (`session-store-jdbc.mod`)
-* NoSQL database (`session-store-mongo.mod`)
-* Google Cloud datastore (`session-store-gcloud.mod`)
-* Hazelcast (`session-store-hazelcast-remote.mod` or `session-store-hazelcast-embedded.mod`)
-* Infinispan (`session-store-infinispan-remote.mod` or `session-store-infinispan-embedded.mod`)
+* relational database storage (`session-store-jdbc.mod`)
+* NoSQL database storage (`session-store-mongo.mod`)
+* Google Cloud datastore storage (`session-store-gcloud.mod`)
+* Hazelcast storage (`session-store-hazelcast-remote.mod` or `session-store-hazelcast-embedded.mod`)
+* Infinispan storage (`session-store-infinispan-remote.mod` or `session-store-infinispan-embedded.mod`)
 
 You might like to consult the [use-cases] to help you decide which combinations best suit your needs.
 
 ____
-TIP
-It is worth noting that if you do not configure _any_ session modules, jetty will still provide http sessions that are cached in memory, but that are never persisted.
+[TIP]
+
+It is worth noting that if you do not configure _any_ session modules, jetty will still provide http sessions that are cached in memory but are never persisted.
 ____
