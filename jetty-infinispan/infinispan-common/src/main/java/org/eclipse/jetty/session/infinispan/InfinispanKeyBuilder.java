@@ -16,6 +16,16 @@
 // ========================================================================
 //
 
-[[faq]]
-== Frequently Asked Questions
+package org.eclipse.jetty.session.infinispan;
 
+/**
+ *
+ *
+ */
+public class InfinispanKeyBuilder
+{
+    public static String build(String contextPath, String vhost, String id)
+    {
+        return contextPath + "_" + vhost + "_" + id;
+    }
+}

@@ -33,8 +33,8 @@ Very little is mandatory and required, and most components are optional; you ena
 
 At its most basic, you configure Jetty from two elements:
 
-1.  A set of libraries and directories that make up the server classpath.
-2.  A set of Jetty XML configuration files (IoC style) that establish how to build the Jetty server and its components.
+1. A set of libraries and directories that make up the server classpath.
+2. A set of Jetty XML configuration files (IoC style) that establish how to build the Jetty server and its components.
 
 Instead of editing these directly, Jetty 9.1 introduced more options on how to configure Jetty (these are merely syntactic sugar that eventually resolve into the two basic configuration components).
 
@@ -60,12 +60,12 @@ When executed `start.jar` performs the following actions:
 ** Please see link:#start-vs-startd[Start.ini vs. Start.d] for more information on the difference between these.
 * Parses actual command line arguments used to execute `start.jar` itself.
 * Resolves any XML configuration files, modules, and libraries using base vs. home resolution steps:
-1.  Checks whether file exists as relative reference to `${jetty.base}.`
-2.  Checks whether file exists as relative reference to `${jetty.home}.`
-3.  Uses default behavior of `java.io.File` (Relative to `System.getProperty` ("user.dir") and then as absolute file system path).
+1. Checks whether file exists as relative reference to `${jetty.base}.`
+2. Checks whether file exists as relative reference to `${jetty.home}.`
+3. Uses default behavior of `java.io.File` (Relative to `System.getProperty` ("user.dir") and then as absolute file system path).
 * Loads any dependent modules (merges XXNK, library, and properties results with active command line).
 * Builds out server classpath.
-* Determines run mode:
+* Determines run mode as one of:
 ** Shows informational command line options and exit.
 ** Executes Jetty normally, waits for Jetty to stop.
 ** Executes a forked JVM to run Jetty in, waits for forked JVM to exit.
@@ -89,9 +89,36 @@ Lists the resolved configuration that will start Jetty.
 * Server classpath
 * Server XML configuration files
 --dry-run::
-Prints the resolved command line that `start.jar` should use to start a forked instance of Jetty.
+Print the command line that the start.jar generates, then exit. This may be used to generate command lines when the start.ini includes -X or -D arguments:
+....
+$ java -jar start.jar --dry-run > jetty.sh
+$ . jetty.sh
+....
+--dry-run=<parts>::
+Print specific parts of the command line. The parts are a comma separated list of:
+
+ * "java" - the JVM to run
+ * "opts" - the JVM options (eg -D and -X flags)
+ * "path" - the JVM class path or JPMS modules options
+ * "main" - the main class to run
+ * "args" - the arguments passed to the main class
+
+It is possible to decompose the start command:
+....
+$ OPTS=$(java -jar start.jar --dry-run=opts,path)
+$ MAIN=$(java -jar start.jar --dry-run=main)
+$ ARGS=$(java -jar start.jar --dry-run=args)
+$ java $OPTS -Dextra=opt $MAIN $ARGS extra=arg
+....
+Alternatively to create an args file for java:
+....
+$ java -jar start.jar --dry-run=opts,path,main,args > /tmp/args
+$ java @/tmp/args
+....
 --exec::
-Starts a forked instance of Jetty.
+Forces the start to use a forked instance of java to run Jetty.
+Some modules include `--exec` in order to set java command line options.
+Some start options, such as `--jpms` also imply `--exec`
 --exec-properties=<filename>::
 Assign a fixed name to the file used to transfer properties to the sub process.
 This allows the generated properties file to be saved and reused.
@@ -99,7 +126,7 @@ Without this option, a temporary file is used.
 --commands=<filename>::
 Instructs `start.jar` to use each line of the specified file as arguments on the command line.
 
-===== Debugg and Start Logging
+===== Debug and Start Logging
 
 --debug::
 Enables debugging output of the startup procedure.
@@ -146,9 +173,9 @@ Doing this will uncomment the property in the associated .ini file and set it to
 Used to update a specified property or properties that exist in an existing .ini file.
 Jetty scans the command line, `${jetty.base}` and `${jetty.home}` for .ini files that have the specified property and update it accordingly.
 +
-[source, screen, subs="{sub-order}"]
+[source,screen,subs="{sub-order}"]
 ....
-$ java -jar ../start.jar --update-ini jetty.http.port=8417
+[my-base]$ java -jar /path/to/jetty-home/start.jar --update-ini jetty.http.port=8417
 ConfigSource <command-line>
 ConfigSource ${jetty.base}
 INFO  : http            property updated jetty.http.port=8417
@@ -274,4 +301,26 @@ If you have a need for a shaded version of `start.jar` (such as for Gradle), you
     <version>{VERSION}</version>
     <classifier>shaded</classifier>
 </dependency>
+....
+
+==== Start.jar without exec or forking.
+
+Some Jetty modules include the `--exec` option so that java command line options can be set.
+Also some `start.jar` options (eg. `--jpms`) include an implicit `--exec`.
+To start jetty without forking a new JVM instance from the start JVM, the `--dry-run` option can be used to generate a command line:
+....
+$ CMD=$(java -jar start.jar --dry-run)
+$ $CMD
+....
+It is possible to decompose the start command so that it can be modified:
+....
+$ OPTS=$(java -jar start.jar --dry-run=opts,path)
+$ MAIN=$(java -jar start.jar --dry-run=main)
+$ ARGS=$(java -jar start.jar --dry-run=args)
+$ java $OPTS -Dextra=opt $MAIN $ARGS extra=arg
+....
+Alternatively to create an args file for java:
+....
+$ java -jar start.jar --dry-run=opts,path,main,args > /tmp/args
+$ java @/tmp/args
 ....
