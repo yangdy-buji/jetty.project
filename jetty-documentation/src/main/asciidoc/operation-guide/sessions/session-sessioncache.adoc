@@ -45,10 +45,7 @@ Values are:
 *  0 : sessions are evicted from the cache as soon as the last active request for it finishes
 *  >= 1 : any positive number is the time in seconds after which a session that is in the cache but has not experienced any activity will be evicted
 
-____
-[NOTE]
-If you are not using one of the session persistence modules, ie one of the `session-store-xxxx.mod`s, then sessions will be lost when the context is stopped.
-____
+NOTE: If you are not using one of the session persistence modules, ie one of the `session-store-xxxx.mod`s, then sessions will be lost when the context is stopped.
 
 jetty.session.saveOnInactiveEvict::
 Boolean, default `false`.

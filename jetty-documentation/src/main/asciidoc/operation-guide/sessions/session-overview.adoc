@@ -52,8 +52,4 @@ The list current includes support for:
 
 You might like to consult the [use-cases] to help you decide which combinations best suit your needs.
 
-____
-[TIP]
-
-It is worth noting that if you do not configure _any_ session modules, jetty will still provide http sessions that are cached in memory but are never persisted.
-____
+TIP: It is worth noting that if you do not configure _any_ session modules, jetty will still provide http sessions that are cached in memory but are never persisted.

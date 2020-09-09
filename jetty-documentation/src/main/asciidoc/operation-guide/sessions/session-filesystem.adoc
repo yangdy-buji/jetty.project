@@ -22,11 +22,7 @@
 
 The `session-store-file` module supports persistent storage of session data in a filesystem.
 
-____
-[NOTE]
-
-Persisting sessions to the local file system should *never* be used in a clustered environment.
-____
+IMPORTANT: Persisting sessions to the local file system should *never* be used in a clustered environment.
 
 ==== Enabling File System Session Storage
 
