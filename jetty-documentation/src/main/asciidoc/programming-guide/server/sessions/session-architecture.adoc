@@ -16,21 +16,54 @@
 // ========================================================================
 //
 
-[[jetty-sessions-architecture]]
+[[pg-server-session-architecture]]
 
-=== Session Architecture
+==== Session Architecture
 
-==== Session Architecture Hierarchy
+===== Terminology
 
-Each Jetty instance has a singular `SessionIdManager` to handle all session requests, regardless of clustering technology.
-For each context on the server there is one (1) `SessionCache` which contains all of the Session objects for the given context.
-The benefit of the `SessionCache` is to ensure that simultaneous requests accessing the same Session Id in the same context always operate on the same Session object.
-The SessionCache implementation supplied with the Jetty distribution does just that: keeps Session objects in memory so that they can be shared between simultaneous requests.
-However, it is possible to provide your own implementation that never shares Session objects should you require it.
+SessionIdManager:: is responsible for allocation of session ids
+HouseKeeper::  is responsible for orchestrating the detection and removal of expired sessions
+SessionHandler:: is responsible for managing the lifecycle of sessions within its associated context
+SessionCache:: is an L1 cache of in-use `Session` objects
+Session:: is a stateful object in memory representing a session
+SessionData:: represents the attributes and metadata associated with a Session
+SessionDataStore:: is responsible for creating, storing and reading `SessionData`
+CachingSessionDataStore:: is an L2 cache of `SessionData`
 
-Where the `SessionCache` handles Session information, Session data is stored in a `SessionDataStore` that is specific to the clustering technology being implemented.
-There is only one (1) `SessionDataStore` per `SessionCache`.
 
 Visually the session architecture can be represented like this:
 
-image::SessionsHierarchy.png[Session architecture diagram]
+[plantuml]
+----
+title Session Composition Diagram
+class Server
+
+interface SessionIdManager
+
+class HouseKeeper
+
+class SessionHandler
+
+interface SessionCache
+
+interface SessionDataStore
+
+class CachingSessionDataStore
+
+class Session
+
+class SessionData
+
+Server "1" *-down- "1" SessionIdManager
+SessionIdManager "1" *-left- "1" HouseKeeper
+Server "1" *-down- "n" SessionHandler
+SessionHandler "1" *-down- "1" SessionCache
+SessionCache "1" *-down- "1" SessionDataStore
+SessionCache  o-down- Session
+Session "1" *-- "1" SessionData
+SessionDataStore --> SessionData: CRUD
+SessionDataStore <|-- CachingSessionDataStore
+CachingSessionDataStore o- SessionData
+----
+

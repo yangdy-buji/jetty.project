@@ -16,11 +16,10 @@
 // ========================================================================
 //
 
-[[session-management]]
-== Session Management
+[[pg-server-session]]
+=== Session Management
 
 Sessions are a concept within the Servlet API which allow requests to store and retrieve information across the time a user spends in an application.
-Choosing the correct session manager implementation is an important consideration for every application as each can fit and perform optimally in different situations.
 
 include::session-architecture.adoc[]
 include::session-components.adoc[]
