@@ -4,11 +4,17 @@
 # Additional ini files are in demo-base/start.d
 # 
 
+[description]
+Configure the Jetty Demo base.
+
 [depends]
 rewrite
 jaas
 test-keystore
+work
 
+[tags]
+demo
 
 [xml]
 # Enable rewrite examples

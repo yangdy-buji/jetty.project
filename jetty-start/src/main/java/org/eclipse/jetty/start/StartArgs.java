@@ -193,7 +193,7 @@ public class StartArgs
 
     // jetty.base - build out commands
     /**
-     * --add-to-start[d]=[module,[module]]
+     * --add-module=[module,[module]]
      */
     private List<String> startModules = new ArrayList<>();
 
@@ -223,13 +223,14 @@ public class StartArgs
     private boolean help = false;
     private boolean stopCommand = false;
     private List<String> listModules = null;
+    private List<String> showModules = null;
     private boolean listClasspath = false;
     private boolean listConfig = false;
     private boolean version = false;
     private boolean dryRun = false;
     private final Set<String> dryRunParts = new HashSet<>();
     private boolean jpms = false;
-    private boolean createStartd = false;
+    private boolean createStartIni = false;
     private boolean updateIni = false;
     private String mavenBaseUri;
 
@@ -346,7 +347,6 @@ public class StartArgs
             System.out.println();
         }
 
-        // Jetty Se
         System.out.println();
     }
 
@@ -999,6 +999,11 @@ public class StartArgs
         return listModules;
     }
 
+    public List<String> getShowModules()
+    {
+        return showModules;
+    }
+
     public boolean isRun()
     {
         return run;
@@ -1019,9 +1024,9 @@ public class StartArgs
         return version;
     }
 
-    public boolean isCreateStartd()
+    public boolean isCreateStartIni()
     {
-        return createStartd;
+        return createStartIni;
     }
 
     public boolean isUpdateIni()
@@ -1245,42 +1250,60 @@ public class StartArgs
         }
 
         // Module Management
-        if ("--list-modules".equals(arg))
+        if ("--list-module".equals(arg) || "--list-modules".equals(arg))
         {
             listModules = Collections.singletonList("-internal");
             run = false;
             return;
         }
 
-        if (arg.startsWith("--list-modules="))
+        if (arg.startsWith("--list-module=") || arg.startsWith("--list-modules="))
         {
             listModules = Props.getValues(arg);
             run = false;
             return;
         }
 
+        // Module Management
+        if ("--show-module".equals(arg) || "--show-modules".equals(arg))
+        {
+            showModules = Collections.emptyList();
+            run = false;
+            return;
+        }
+
+        if (arg.startsWith("--show-module=") || arg.startsWith("--show-modules="))
+        {
+            showModules = Props.getValues(arg);
+            run = false;
+            return;
+        }
+
         // jetty.base build-out : add to ${jetty.base}/start.ini
+
+        if ("--create-start-ini".equals(arg))
+        {
+            createStartIni = true;
+            run = false;
+            createFiles = true;
+            licenseCheckRequired = true;
+            return;
+        }
         if ("--create-startd".equals(arg))
         {
-            createStartd = true;
+            StartLog.warn("--create-startd option is deprecated! By default start.d is used");
             run = false;
             createFiles = true;
             licenseCheckRequired = true;
             return;
         }
-        if (arg.startsWith("--add-to-startd="))
+        if (arg.startsWith("--add-module=") || arg.startsWith("--add-modules=") || arg.startsWith("--add-to-start=") || arg.startsWith("--add-to-startd="))
         {
-            String value = Props.getValue(arg);
-            StartLog.warn("--add-to-startd is deprecated! Instead use: --create-startd --add-to-start=%s", value);
-            createStartd = true;
-            startModules.addAll(Props.getValues(arg));
-            run = false;
-            createFiles = true;
-            licenseCheckRequired = true;
-            return;
-        }
-        if (arg.startsWith("--add-to-start="))
-        {
+            if (arg.startsWith("--add-to-start=") || arg.startsWith("--add-to-startd="))
+            {
+                String value = Props.getValue(arg);
+                StartLog.warn("Option " + arg.split("=")[0] + " is deprecated! Instead use: --add-module=%s", value);
+            }
             startModules.addAll(Props.getValues(arg));
             run = false;
             createFiles = true;
