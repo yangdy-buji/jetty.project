@@ -19,6 +19,7 @@
 package org.eclipse.jetty.util.compression;
 
 import java.io.Closeable;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import org.eclipse.jetty.util.Pool;
 import org.eclipse.jetty.util.component.AbstractLifeCycle;
@@ -29,6 +30,9 @@ public abstract class CompressionPool<T> extends AbstractLifeCycle
 
     private int _capacity;
     private Pool<Entry> _pool;
+
+    public AtomicInteger _totalCount = new AtomicInteger(0);
+    public AtomicInteger _creationCount = new AtomicInteger(0);
 
     /**
      * Create a Pool of {@link T} instances.
@@ -75,7 +79,14 @@ public abstract class CompressionPool<T> extends AbstractLifeCycle
                 entry = acquiredEntry.getPooled();
         }
 
-        return (entry == null) ? new Entry(newPooled()) : entry;
+        if (entry == null)
+            entry = new Entry(newPooled());
+
+        _totalCount.incrementAndGet();
+        if (entry.isFirst())
+            _creationCount.incrementAndGet();
+
+        return entry;
     }
 
     /**
@@ -119,6 +130,14 @@ public abstract class CompressionPool<T> extends AbstractLifeCycle
         {
             _value = value;
             _entry = entry;
+        }
+
+        boolean isFirst = true;
+        public boolean isFirst()
+        {
+            boolean wasFirst = isFirst;
+            isFirst = false;
+            return wasFirst;
         }
 
         public T get()

@@ -21,6 +21,7 @@ package org.eclipse.jetty.server.jmh;
 import java.util.concurrent.TimeUnit;
 import java.util.zip.Deflater;
 
+import org.eclipse.jetty.server.jmh.oldimpl.DeflaterPool2;
 import org.eclipse.jetty.util.compression.DeflaterPool;
 import org.openjdk.jmh.annotations.Benchmark;
 import org.openjdk.jmh.annotations.BenchmarkMode;
@@ -47,7 +48,8 @@ import org.openjdk.jmh.runner.options.OptionsBuilder;
 public class DeflaterPoolBenchmark
 {
     public static final String COMPRESSION_STRING = "hello world";
-    DeflaterPool _pool;
+    private DeflaterPool _newPool;
+    private DeflaterPool2 _oldPool;
 
     @Param({"NO_POOL", "DEFLATER_POOL_10", "DEFLATER_POOL_20", "DEFLATER_POOL_50", "DEFLATER_POOL_DEFAULT"})
     public static String poolType;
@@ -83,28 +85,48 @@ public class DeflaterPoolBenchmark
                 throw new IllegalStateException("Unknown poolType Parameter");
         }
 
-        _pool = new DeflaterPool(capacity, Deflater.DEFAULT_COMPRESSION, true);
-        _pool.start();
+        _newPool = new DeflaterPool(capacity, Deflater.DEFAULT_COMPRESSION, true);
+        _oldPool = new DeflaterPool2(capacity, Deflater.DEFAULT_COMPRESSION, true);
+        _newPool.start();
+        _oldPool.start();
     }
 
     @TearDown(Level.Trial)
     public void stopTrial() throws Exception
     {
-        _pool.stop();
+        System.err.println("Stats Old: " + _newPool._creationCount.get() + "/" + _newPool._totalCount.get());
+        System.err.println("Stats New: " + _newPool._creationCount.get() + "/" + _newPool._totalCount.get());
+        _newPool.stop();
+        _oldPool.stop();
     }
 
     @Benchmark
     @BenchmarkMode({Mode.Throughput})
-    public long testPool() throws Exception
+    public long testNewPool() throws Exception
     {
-        DeflaterPool.Entry entry = _pool.acquire();
+        DeflaterPool.Entry entry = _newPool.acquire();
         Deflater deflater = entry.get();
         deflater.setInput(COMPRESSION_STRING.getBytes());
         deflater.finish();
 
         byte[] output = new byte[COMPRESSION_STRING.length() + 1];
         int compressedDataLength = deflater.deflate(output);
-        _pool.release(entry);
+        _newPool.release(entry);
+
+        return compressedDataLength;
+    }
+
+    @Benchmark
+    @BenchmarkMode({Mode.Throughput})
+    public long testOldPool() throws Exception
+    {
+        Deflater deflater = _oldPool.acquire();
+        deflater.setInput(COMPRESSION_STRING.getBytes());
+        deflater.finish();
+
+        byte[] output = new byte[COMPRESSION_STRING.length() + 1];
+        int compressedDataLength = deflater.deflate(output);
+        _oldPool.release(deflater);
 
         return compressedDataLength;
     }
