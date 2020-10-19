@@ -152,7 +152,7 @@ if proceedyn "Are you sure you want to release using above? (y/N)" n; then
     if proceedyn "Create Tag $TAG_NAME? (Y/n)" y; then
         echo "TODO: Sign tags with GIT_USER_EMAIL=$GIT_USER_EMAIL"
         echo "Using target/vers-tag.txt as tag text"
-        git tag --file=target/vers-tag.txt $TAG_NAME
+        git tag --file=target/version-tag.txt $TAG_NAME
     fi
 
     # This is equivalent to 'mvn release:perform'
