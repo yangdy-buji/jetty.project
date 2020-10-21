@@ -41,6 +41,10 @@
           <excludes>
             <exclude>org.eclipse.jetty.webapp.WebAppClassLoaderUrlStreamTest</exclude>
           </excludes>
+          <systemPropertyVariables>
+            <mavenRepoPath>${settings.localRepository}</mavenRepoPath>
+            <jettyVersion>${project.version}</jettyVersion>
+          </systemPropertyVariables>
         </configuration>
       </plugin>
     </plugins>
@@ -78,6 +82,24 @@
     <dependency>
       <groupId>org.eclipse.jetty.toolchain</groupId>
       <artifactId>jetty-test-helper</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.apache.maven</groupId>
+      <artifactId>maven-resolver-provider</artifactId>
+      <version>${maven.version}</version>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.testcontainers</groupId>
+      <artifactId>testcontainers</artifactId>
+      <version>${testcontainers.version}</version>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.testcontainers</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <version>${testcontainers.version}</version>
       <scope>test</scope>
     </dependency>
   </dependencies>
