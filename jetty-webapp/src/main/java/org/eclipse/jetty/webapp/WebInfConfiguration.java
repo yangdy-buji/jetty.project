@@ -907,7 +907,7 @@ public class WebInfConfiguration extends AbstractConfiguration
             return null;
 
         List<Resource> jarResources = new ArrayList<>();
-        Resource webInfLib = webInf.addPath("/lib");
+        Resource webInfLib = webInf.addPath("lib/");
         if (webInfLib.exists() && webInfLib.isDirectory())
         {
             String[] files = webInfLib.list();

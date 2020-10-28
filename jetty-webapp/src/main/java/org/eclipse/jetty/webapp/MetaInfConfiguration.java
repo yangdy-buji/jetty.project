@@ -206,13 +206,13 @@ public class MetaInfConfiguration extends AbstractConfiguration
             if (target.isDirectory())
             {
                 //TODO think  how to handle an unpacked jar file (eg for osgi)
-                resourcesDir = target.addPath("/META-INF/resources");
+                resourcesDir = target.addPath("/META-INF/resources/");
             }
             else
             {
                 //Resource represents a packed jar
                 URI uri = target.getURI();
-                resourcesDir = Resource.newResource(uriJarPrefix(uri, "!/META-INF/resources"));
+                resourcesDir = Resource.newResource(uriJarPrefix(uri, "!/META-INF/resources/"));
             }
 
             if (!resourcesDir.exists() || !resourcesDir.isDirectory())
@@ -227,7 +227,7 @@ public class MetaInfConfiguration extends AbstractConfiguration
                 if (old != null)
                     resourcesDir = old;
                 else if (LOG.isDebugEnabled())
-                    LOG.debug(target + " META-INF/resources cache updated");
+                    LOG.debug(target + " META-INF/resources/ cache updated");
             }
 
             if (resourcesDir == EmptyResource.INSTANCE)
