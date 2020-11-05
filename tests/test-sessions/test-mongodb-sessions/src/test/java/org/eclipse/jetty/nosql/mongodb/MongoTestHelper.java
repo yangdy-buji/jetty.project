@@ -37,6 +37,7 @@ import org.slf4j.LoggerFactory;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.output.Slf4jLogConsumer;
 import org.testcontainers.containers.wait.strategy.LogMessageWaitStrategy;
+import org.testcontainers.utility.DockerImageName;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -53,7 +54,7 @@ public class MongoTestHelper
     public static final String COLLECTION_NAME = "testsessions";
 
     static GenericContainer mongo =
-        new GenericContainer("mongo:" + System.getProperty("mongo.docker.version", "2.2.7"))
+        new GenericContainer(DockerImageName.parse( "mongo:" + System.getProperty( "mongo.docker.version", "2.2.7")))
             .withLogConsumer(new Slf4jLogConsumer(MONGO_LOG))
             .waitingFor(new LogMessageWaitStrategy()
                             .withRegEx(".*waiting for connections.*"));
@@ -283,7 +284,7 @@ public class MongoTestHelper
         {
             SessionData tmp = new SessionData(id, contextPath, vhost, created, accessed, lastAccessed, maxIdle, attributes);
             try (ByteArrayOutputStream baos = new ByteArrayOutputStream();
-                 ObjectOutputStream oos = new ObjectOutputStream(baos);)
+                 ObjectOutputStream oos = new ObjectOutputStream(baos))
             {
                 SessionData.serializeAttributes(tmp, oos);
                 sets.put(MongoSessionDataStore.CONTEXT + "." + vhost.replace('.', '_') + ":" + contextPath + "." + MongoSessionDataStore.ATTRIBUTES, baos.toByteArray());

@@ -117,7 +117,7 @@ public class MongoSessionDataStoreTest extends AbstractSessionDataStoreTest
 
         Map<String, Object> attributes = new HashMap<>();
         attributes.put("attribute1", "attribute1value");
-        attributes.put("attribute2", new ArrayList<String>(Arrays.asList("1", "2", "3")));
+        attributes.put("attribute2", new ArrayList<>(Arrays.asList("1", "2", "3")));
         MongoTestHelper.createLegacySession("1234",
             sessionContext.getCanonicalContextPath(), sessionContext.getVhost(),
             "foo",

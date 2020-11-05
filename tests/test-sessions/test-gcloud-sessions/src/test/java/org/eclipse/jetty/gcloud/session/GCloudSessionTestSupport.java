@@ -172,7 +172,7 @@ public class GCloudSessionTestSupport
         assertEquals(data.getLastSaved(), entity.getLong(EntityDataModel.LASTSAVED));
         assertEquals(data.getExpiry(), entity.getLong(EntityDataModel.EXPIRY));
         assertEquals(data.getMaxInactiveMs(), entity.getLong(EntityDataModel.MAXINACTIVE));
-        Blob blob = (Blob)entity.getBlob(EntityDataModel.ATTRIBUTES);
+        Blob blob = entity.getBlob(EntityDataModel.ATTRIBUTES);
 
         SessionData tmp = new SessionData(data.getId(), entity.getString(EntityDataModel.CONTEXTPATH),
             entity.getString(EntityDataModel.VHOST),
@@ -219,7 +219,7 @@ public class GCloudSessionTestSupport
 
     public Set<String> getSessionIds() throws Exception
     {
-        HashSet<String> ids = new HashSet<String>();
+        HashSet<String> ids = new HashSet<>();
         GqlQuery.Builder builder = Query.newGqlQueryBuilder(ResultType.ENTITY, "select * from " + GCloudSessionDataStore.EntityDataModel.KIND);
 
         Query<Entity> query = builder.build();
@@ -275,7 +275,7 @@ public class GCloudSessionTestSupport
 
         if (results != null)
         {
-            List<Key> keys = new ArrayList<Key>();
+            List<Key> keys = new ArrayList<>();
 
             while (results.hasNext())
             {

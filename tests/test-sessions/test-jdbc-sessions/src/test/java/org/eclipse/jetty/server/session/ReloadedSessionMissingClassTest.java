@@ -19,9 +19,9 @@
 package org.eclipse.jetty.server.session;
 
 import java.io.File;
-import java.io.FileWriter;
 import java.net.URL;
 import java.net.URLClassLoader;
+import java.nio.file.Files;
 import javax.servlet.http.HttpServletResponse;
 
 import org.eclipse.jetty.client.HttpClient;
@@ -62,7 +62,7 @@ public class ReloadedSessionMissingClassTest
         File unpackedWarDir = testdir.getEmptyPathDir().toFile();
 
         File webInfDir = new File(unpackedWarDir, "WEB-INF");
-        webInfDir.mkdir();
+        assertTrue(webInfDir.mkdir());
 
         File webXml = new File(webInfDir, "web.xml");
         String xml =
@@ -76,9 +76,8 @@ public class ReloadedSessionMissingClassTest
                 " <session-timeout>1</session-timeout>\n" +
                 "</session-config>\n" +
                 "</web-app>";
-        FileWriter w = new FileWriter(webXml);
-        w.write(xml);
-        w.close();
+
+        Files.write(webXml.toPath(),xml.getBytes());
 
         File foobarJar = MavenTestingUtils.getTestResourceFile("foobar.jar");
         File foobarNOfooJar = MavenTestingUtils.getTestResourceFile("foobarNOfoo.jar");
@@ -113,7 +112,7 @@ public class ReloadedSessionMissingClassTest
 
                 assertEquals(HttpServletResponse.SC_OK, response.getStatus());
                 String sessionCookie = response.getHeaders().get("Set-Cookie");
-                assertTrue(sessionCookie != null);
+                assertNotNull(sessionCookie);
                 String sessionId = (String)webApp.getServletContext().getAttribute("foo");
                 assertNotNull(sessionId);
 
@@ -133,7 +132,7 @@ public class ReloadedSessionMissingClassTest
                 Boolean fooPresent = (Boolean)webApp.getServletContext().getAttribute("foo.present");
                 assertFalse(fooPresent);
                 assertNotNull(afterStopSessionId);
-                assertTrue(!afterStopSessionId.equals(sessionId));
+                assertFalse(afterStopSessionId.equals(sessionId));
             }
             finally
             {

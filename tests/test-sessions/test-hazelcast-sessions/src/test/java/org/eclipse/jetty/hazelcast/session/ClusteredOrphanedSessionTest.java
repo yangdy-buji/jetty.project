@@ -30,8 +30,6 @@ public class ClusteredOrphanedSessionTest
     extends AbstractClusteredOrphanedSessionTest
 {
 
-    HazelcastSessionDataStoreFactory factory;
-
     HazelcastTestHelper _testHelper;
 
     @BeforeEach

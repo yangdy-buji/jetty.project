@@ -32,7 +32,8 @@ import org.eclipse.jetty.client.api.Request;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 
 /**
  * AbstractClusteredOrphanedSessionTest
@@ -90,7 +91,7 @@ public abstract class AbstractClusteredOrphanedSessionTest extends AbstractTestB
                     ContentResponse response1 = client.GET("http://localhost:" + port1 + contextPath + servletMapping.substring(1) + "?action=init");
                     assertEquals(HttpServletResponse.SC_OK, response1.getStatus());
                     String sessionCookie = response1.getHeaders().get("Set-Cookie");
-                    assertTrue(sessionCookie != null);
+                    assertNotNull(sessionCookie);
                     // Mangle the cookie, replacing Path with $Path, etc.
                     sessionCookie = sessionCookie.replaceFirst("(\\W)(P|p)ath=", "$1\\$Path=");
 
@@ -141,7 +142,7 @@ public abstract class AbstractClusteredOrphanedSessionTest extends AbstractTestB
             else if ("check".equals(action))
             {
                 HttpSession session = request.getSession(false);
-                assertTrue(session == null);
+                assertNull(session);
             }
         }
     }

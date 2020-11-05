@@ -20,7 +20,7 @@ package org.eclipse.jetty.server.session;
 
 import java.io.File;
 import java.io.FileOutputStream;
-import java.io.FileWriter;
+import java.nio.file.Files;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import javax.servlet.http.HttpServletResponse;
@@ -35,6 +35,7 @@ import org.eclipse.jetty.webapp.WebAppContext;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -58,9 +59,9 @@ public abstract class AbstractWebAppObjectInSessionTest extends AbstractTestBase
 
         File targetDir = new File(System.getProperty("basedir"), "target");
         File warDir = new File(targetDir, contextName);
-        warDir.mkdir();
+        assertTrue(warDir.mkdir());
         File webInfDir = new File(warDir, "WEB-INF");
-        webInfDir.mkdir();
+        assertTrue(webInfDir.mkdir());
         // Write web.xml
         File webXml = new File(webInfDir, "web.xml");
         String xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n" +
@@ -70,14 +71,12 @@ public abstract class AbstractWebAppObjectInSessionTest extends AbstractTestBase
             "         version=\"2.4\">\n" +
             "\n" +
             "</web-app>";
-        FileWriter w = new FileWriter(webXml);
-        w.write(xml);
-        w.close();
+        Files.write(webXml.toPath(),xml.getBytes());
         File classesDir = new File(webInfDir, "classes");
-        classesDir.mkdir();
+        assertTrue(classesDir.mkdir());
         String packageName = WebAppObjectInSessionServlet.class.getPackage().getName();
         File packageDirs = new File(classesDir, packageName.replace('.', File.separatorChar));
-        packageDirs.mkdirs();
+        assertTrue(packageDirs.mkdirs());
 
         String resourceName = WebAppObjectInSessionServlet.class.getSimpleName() + ".class";
         Resource resource = Resource.newResource(getClass().getResource(resourceName));
@@ -132,7 +131,7 @@ public abstract class AbstractWebAppObjectInSessionTest extends AbstractTestBase
                     ContentResponse response = request.send();
                     assertEquals(HttpServletResponse.SC_OK, response.getStatus());
                     String sessionCookie = response.getHeaders().get("Set-Cookie");
-                    assertTrue(sessionCookie != null);
+                    assertNotNull(sessionCookie);
                     // Mangle the cookie, replacing Path with $Path, etc.
                     sessionCookie = sessionCookie.replaceFirst("(\\W)(P|p)ath=", "$1\\$Path=");
                     

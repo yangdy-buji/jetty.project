@@ -26,8 +26,6 @@ import org.junit.jupiter.api.BeforeEach;
 public class HazelcastClusteredInvalidationSessionTest
     extends AbstractClusteredInvalidationSessionTest
 {
-    HazelcastSessionDataStoreFactory factory;
-
     HazelcastTestHelper _testHelper;
 
     @BeforeEach

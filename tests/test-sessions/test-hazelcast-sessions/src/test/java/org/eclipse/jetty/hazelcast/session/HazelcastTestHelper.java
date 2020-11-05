@@ -43,7 +43,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 public class HazelcastTestHelper
 {
-    static final String _hazelcastInstanceName = "SESSION_TEST_" + Long.toString(TimeUnit.NANOSECONDS.toMillis(System.nanoTime()));
+    static final String _hazelcastInstanceName = "SESSION_TEST_" + TimeUnit.NANOSECONDS.toMillis(System.nanoTime());
 
     static final String _name = Long.toString(TimeUnit.NANOSECONDS.toMillis(System.nanoTime()));
 
@@ -130,11 +130,11 @@ public class HazelcastTestHelper
         //same number of attributes
         assertEquals(data.getAllAttributes().size(), saved.getAllAttributes().size());
         //same keys
-        assertTrue(data.getKeys().equals(saved.getKeys()));
+        assertEquals(data.getKeys(), saved.getKeys());
         //same values
         for (String name : data.getKeys())
         {
-            assertTrue(data.getAttribute(name).equals(saved.getAttribute(name)));
+            assertEquals(data.getAttribute(name), saved.getAttribute(name));
         }
         return true;
     }

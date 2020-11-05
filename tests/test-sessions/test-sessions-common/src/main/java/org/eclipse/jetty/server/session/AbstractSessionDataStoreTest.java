@@ -42,6 +42,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
 
@@ -83,7 +84,7 @@ public abstract class AbstractSessionDataStoreTest
         //Use a class that would only be known to the webapp classloader
         InputStream foostream = Thread.currentThread().getContextClassLoader().getResourceAsStream("Foo.clazz");
         File foodir = new File(MavenTestingUtils.getTargetDir(), "foo");
-        foodir.mkdirs();
+        assertTrue(foodir.mkdirs());
         File fooclass = new File(foodir, "Foo.class");
         IO.copy(foostream, new FileOutputStream(fooclass));
 
@@ -108,7 +109,7 @@ public abstract class AbstractSessionDataStoreTest
         store.start();
 
         ClassLoader old = Thread.currentThread().getContextClassLoader();
-        SessionData data = null;
+        SessionData data;
         try
         {
             Thread.currentThread().setContextClassLoader(_contextClassLoader);
@@ -131,20 +132,15 @@ public abstract class AbstractSessionDataStoreTest
         //before serialization
         final SessionData finalData = data;
 
-        Runnable r = new Runnable()
+        Runnable r = () ->
         {
-
-            @Override
-            public void run()
+            try
             {
-                try
-                {
-                    store.store("1234", finalData);
-                }
-                catch (Exception e)
-                {
-                    fail(e);
-                }
+                store.store("1234", finalData);
+            }
+            catch (Exception e)
+            {
+                fail(e);
             }
         };
 
@@ -204,7 +200,7 @@ public abstract class AbstractSessionDataStoreTest
         //Use classes that would only be known to the webapp classloader
         InputStream is = Thread.currentThread().getContextClassLoader().getResourceAsStream("Proxyable.clazz");
         File proxyabledir = new File(MavenTestingUtils.getTargetDir(), "proxyable");
-        proxyabledir.mkdirs();
+        assertTrue(proxyabledir.mkdirs());
         File proxyableClass = new File(proxyabledir, "Proxyable.class");
         IO.copy(is, new FileOutputStream(proxyableClass));
         is.close();
@@ -280,20 +276,15 @@ public abstract class AbstractSessionDataStoreTest
         //before serialization
         final SessionData finalData = data;
 
-        Runnable r = new Runnable()
+        Runnable r = () ->
         {
-
-            @Override
-            public void run()
+            try
             {
-                try
-                {
-                    store.store("1234", finalData);
-                }
-                catch (Exception e)
-                {
-                    fail(e);
-                }
+                store.store("1234", finalData);
+            }
+            catch (Exception e)
+            {
+                fail(e);
             }
         };
 
@@ -416,16 +407,7 @@ public abstract class AbstractSessionDataStoreTest
 
         store.start();
 
-        //test that we can retrieve it
-        try
-        {
-            store.load("222");
-            fail("Session should be unreadable");
-        }
-        catch (UnreadableSessionDataException e)
-        {
-            //expected exception
-        }
+        assertThrows(UnreadableSessionDataException.class, () -> store.load("222"));
     }
     
     

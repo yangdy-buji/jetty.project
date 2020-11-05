@@ -38,7 +38,6 @@ import org.testcontainers.containers.MariaDBContainer;
 import org.testcontainers.containers.output.Slf4jLogConsumer;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * JdbcTestHelper
@@ -270,11 +269,11 @@ public class JdbcTestHelper
             //same number of attributes
             assertEquals(data.getAllAttributes().size(), tmp.getAllAttributes().size());
             //same keys
-            assertTrue(data.getKeys().equals(tmp.getAllAttributes().keySet()));
+            assertEquals(data.getKeys(), tmp.getAllAttributes().keySet());
             //same values
             for (String name : data.getKeys())
             {
-                assertTrue(data.getAttribute(name).equals(tmp.getAttribute(name)));
+                assertEquals(data.getAttribute(name), tmp.getAttribute(name));
             }
         }
         finally
@@ -313,12 +312,12 @@ public class JdbcTestHelper
             statement.setLong(11, data.getMaxInactiveMs());
             
             try (ByteArrayOutputStream baos = new ByteArrayOutputStream();
-                ObjectOutputStream oos = new ObjectOutputStream(baos);)
+                ObjectOutputStream oos = new ObjectOutputStream(baos))
             {
                 SessionData.serializeAttributes(data, oos);
                 byte[] bytes = baos.toByteArray();
 
-                try (ByteArrayInputStream bais = new ByteArrayInputStream(bytes);)
+                try (ByteArrayInputStream bais = new ByteArrayInputStream(bytes))
                 {
                     statement.setBinaryStream(12, bais, bytes.length);
                 }

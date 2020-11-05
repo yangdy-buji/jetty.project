@@ -30,8 +30,6 @@ public class ClusteredSessionScavengingTest
     extends AbstractClusteredSessionScavengingTest
 {
 
-    HazelcastSessionDataStoreFactory factory;
-
     HazelcastTestHelper _testHelper;
 
     @BeforeEach

@@ -25,8 +25,6 @@ import java.nio.file.Path;
 import java.util.Properties;
 
 import org.eclipse.jetty.toolchain.test.FS;
-import org.eclipse.jetty.toolchain.test.jupiter.WorkDir;
-import org.eclipse.jetty.toolchain.test.jupiter.WorkDirExtension;
 import org.eclipse.jetty.util.IO;
 import org.hibernate.search.cfg.Environment;
 import org.hibernate.search.cfg.SearchMapping;
@@ -37,7 +35,6 @@ import org.infinispan.configuration.cache.Index;
 import org.infinispan.configuration.global.GlobalConfigurationBuilder;
 import org.infinispan.manager.DefaultCacheManager;
 import org.infinispan.manager.EmbeddedCacheManager;
-import org.junit.jupiter.api.extension.ExtendWith;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -48,7 +45,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 public class InfinispanTestSupport
 {
     public static final String DEFAULT_CACHE_NAME = "session_test_cache";
-    public Cache _cache;
+    public Cache<String, SessionData> _cache;
 
     public ConfigurationBuilder _builder;
     private File _tmpdir;
@@ -93,7 +90,7 @@ public class InfinispanTestSupport
         _serializeSessionData = serializeSessionData;
     }
     
-    public Cache getCache()
+    public Cache<String,SessionData> getCache()
     {
         return _cache;
     }
@@ -208,11 +205,11 @@ public class InfinispanTestSupport
         //same number of attributes
         assertEquals(data.getAllAttributes().size(), saved.getAllAttributes().size());
         //same keys
-        assertTrue(data.getKeys().equals(saved.getKeys()));
+        assertEquals(data.getKeys(), saved.getKeys());
         //same values
         for (String name : data.getKeys())
         {
-            assertTrue(data.getAttribute(name).equals(saved.getAttribute(name)));
+            assertEquals(data.getAttribute(name), saved.getAttribute(name));
         }
 
         return true;

@@ -42,10 +42,9 @@ import org.slf4j.LoggerFactory;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.output.Slf4jLogConsumer;
 import org.testcontainers.containers.wait.strategy.LogMessageWaitStrategy;
-import org.testcontainers.utility.MountableFile;
+import org.testcontainers.utility.DockerImageName;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * RemoteInfinispanTestSupport
@@ -66,12 +65,11 @@ public class RemoteInfinispanTestSupport
     {
         try
         {
-            //Testcontainers.exposeHostPorts(11222);
             long start = System.currentTimeMillis();
             String infinispanVersion = System.getProperty("infinispan.docker.image.version", "9.4.8.Final");
             infinispan =
-                new GenericContainer(System.getProperty("infinispan.docker.image.name", "jboss/infinispan-server") +
-                                         ":" + infinispanVersion)
+                new GenericContainer(DockerImageName.parse(System.getProperty( "infinispan.docker.image.name", "jboss/infinispan-server") +
+                                         ":" + infinispanVersion))
                     .withEnv("APP_USER","theuser")
                     .withEnv("APP_PASS","foobar")
                     .withEnv("MGMT_USER", "admin")
@@ -211,11 +209,11 @@ public class RemoteInfinispanTestSupport
         //same number of attributes
         assertEquals(data.getAllAttributes().size(), saved.getAllAttributes().size());
         //same keys
-        assertTrue(data.getKeys().equals(saved.getKeys()));
+        assertEquals(data.getKeys(), saved.getKeys());
         //same values
         for (String name : data.getKeys())
         {
-            assertTrue(data.getAttribute(name).equals(saved.getAttribute(name)));
+            assertEquals(data.getAttribute(name), saved.getAttribute(name));
         }
 
         return true;

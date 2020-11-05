@@ -34,7 +34,7 @@ import org.junit.jupiter.api.Test;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 /**
  * ClusteredSessionMigrationTest
@@ -108,7 +108,7 @@ public class ClusteredSessionMigrationTest extends AbstractTestBase
                     ContentResponse response1 = request1.send();
                     assertEquals(HttpServletResponse.SC_OK, response1.getStatus());
                     String sessionCookie = response1.getHeaders().get("Set-Cookie");
-                    assertTrue(sessionCookie != null);
+                    assertNotNull(sessionCookie);
                     // Mangle the cookie, replacing Path with $Path, etc.
                     sessionCookie = sessionCookie.replaceFirst("(\\W)(P|p)ath=", "$1\\$Path=");
 

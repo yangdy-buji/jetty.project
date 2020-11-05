@@ -31,8 +31,8 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.junit.jupiter.api.Assertions.fail;
 
 /**
  * TestFileSessions
@@ -98,50 +98,22 @@ public class TestFileSessions extends AbstractTestBase
         long l = store.getExpiryFromFilename("100__test_0.0.0.0_1234");
         assertEquals(100, l);
 
-        try
-        {
-            long ll = store.getExpiryFromFilename("nonnumber__test_0.0.0.0_1234");
-            fail("Should be non numeric");
-        }
-        catch (Exception e)
-        {
-            //expected
-        }
+        assertThrows(NumberFormatException.class,
+                     () -> store.getExpiryFromFilename("nonnumber__test_0.0.0.0_1234"));
 
-        try
-        {
-            long ll = store.getExpiryFromFilename(null);
-            fail("Should throw ISE");
-        }
-        catch (Exception e)
-        {
-            //expected;
-        }
+        assertThrows(IllegalStateException.class,
+                    () -> store.getExpiryFromFilename(null));
 
-        try
-        {
-            long ll = store.getExpiryFromFilename("thisisnotavalidsessionfilename");
-            fail("Should throw ISE");
-        }
-        catch (IllegalStateException e)
-        {
-            //expected;
-        }
+        assertThrows(IllegalStateException.class,
+                     () -> store.getExpiryFromFilename("thisisnotavalidsessionfilename"));
 
         s = store.getContextFromFilename("100__test_0.0.0.0_1234");
         assertEquals("_test_0.0.0.0", s);
 
         assertNull(store.getContextFromFilename(null));
 
-        try
-        {
-            s = store.getContextFromFilename("thisisnotavalidfilename");
-            fail("Should throw exception");
-        }
-        catch (StringIndexOutOfBoundsException e)
-        {
-            //expected;
-        }
+        assertThrows(StringIndexOutOfBoundsException.class,
+                     () -> store.getContextFromFilename("thisisnotavalidfilename"));
 
         s = store.getIdWithContextFromFilename("100__test_0.0.0.0_1234");
         assertEquals("_test_0.0.0.0_1234", s);
@@ -174,15 +146,8 @@ public class TestFileSessions extends AbstractTestBase
         long l = store.getExpiryFromFilename("100__0.0.0.0_1234");
         assertEquals(100, l);
 
-        try
-        {
-            long ll = store.getExpiryFromFilename("nonnumber__0.0.0.0_1234");
-            fail("Should be non numeric");
-        }
-        catch (Exception e)
-        {
-            //expected
-        }
+        assertThrows(NumberFormatException.class,
+                     () ->  store.getExpiryFromFilename("nonnumber__0.0.0.0_1234"));
 
         s = store.getContextFromFilename("100__0.0.0.0_1234");
         assertEquals("_0.0.0.0", s);
@@ -357,16 +322,8 @@ public class TestFileSessions extends AbstractTestBase
 
         store.start();
 
-        try
-        {
-            store.load("validFile123");
-            fail("Load should fail");
-        }
-        catch (Exception e)
-        {
-            //expected exception
-        }
-
+        assertThrows(UnreadableSessionDataException.class,
+                     () -> store.load("validFile123"));
         FileTestHelper.assertFileExists(workDir, expectedFilename, false);
     }
 
@@ -393,17 +350,17 @@ public class TestFileSessions extends AbstractTestBase
 
         //create a file for session abc that expired 5sec ago
         long exp = now - 5000L;
-        String name1 = Long.toString(exp) + "__test_0.0.0.0_abc";
+        String name1 = exp + "__test_0.0.0.0_abc";
         FileTestHelper.createFile(workDir, name1);
 
         //create a file for same session that expired 4 sec ago
         exp = now - 4000L;
-        String name2 = Long.toString(exp) + "__test_0.0.0.0_abc";
+        String name2 = exp + "__test_0.0.0.0_abc";
         FileTestHelper.createFile(workDir, name2);
 
         //make a file for same session that expired 3 sec ago
         exp = now - 3000L;
-        String name3 = Long.toString(exp) + "__test_0.0.0.0_abc";
+        String name3 = exp + "__test_0.0.0.0_abc";
         FileTestHelper.createFile(workDir, name3);
 
         store.start();

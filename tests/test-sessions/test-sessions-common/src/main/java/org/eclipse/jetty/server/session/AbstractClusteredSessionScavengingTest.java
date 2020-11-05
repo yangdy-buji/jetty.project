@@ -22,7 +22,6 @@ import java.io.IOException;
 import java.io.PrintWriter;
 import java.util.HashSet;
 import java.util.Set;
-import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import javax.servlet.ServletException;
 import javax.servlet.http.HttpServlet;
@@ -112,7 +111,7 @@ public abstract class AbstractClusteredSessionScavengingTest extends AbstractTes
                     assertEquals(HttpServletResponse.SC_OK, response1.getStatus());
                     assertTrue(response1.getContentAsString().startsWith("init"));
                     String sessionCookie = response1.getHeaders().get("Set-Cookie");
-                    assertTrue(sessionCookie != null);
+                    assertNotNull(sessionCookie);
                     String id = TestServer.extractSessionId(sessionCookie);
                     assertEquals(1, ((DefaultSessionCache)m1.getSessionCache()).getSessionsCurrent());
                     assertEquals(1, ((DefaultSessionCache)m1.getSessionCache()).getSessionsMax());

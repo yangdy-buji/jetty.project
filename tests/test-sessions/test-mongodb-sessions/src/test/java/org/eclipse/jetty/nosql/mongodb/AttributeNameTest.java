@@ -40,7 +40,6 @@ import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * AttributeNameTest
@@ -109,7 +108,7 @@ public class AttributeNameTest
 
                 String sessionCookie = response.getHeaders().get(HttpHeader.SET_COOKIE);
 
-                assertTrue(sessionCookie != null);
+                assertNotNull( sessionCookie );
                 //Mangle the cookie, replacing Path with $Path, etc.
                 sessionCookie = sessionCookie.replaceFirst("(\\W)(P|p)ath=", "$1\\$Path=");
 

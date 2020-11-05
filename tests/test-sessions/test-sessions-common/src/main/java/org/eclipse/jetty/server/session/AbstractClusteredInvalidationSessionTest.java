@@ -35,8 +35,9 @@ import org.eclipse.jetty.util.thread.QueuedThreadPool;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.junit.jupiter.api.Assertions.fail;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /**
  * AbstractClusteredInvalidationSessionTest
@@ -102,7 +103,7 @@ public abstract class AbstractClusteredInvalidationSessionTest extends AbstractT
 
                     assertEquals(HttpServletResponse.SC_OK, response1.getStatus());
                     String sessionCookie = response1.getHeaders().get("Set-Cookie");
-                    assertTrue(sessionCookie != null);
+                    assertNotNull(sessionCookie);
 
                     //ensure request is fully finished processing
                     latch.await(5, TimeUnit.SECONDS);
@@ -171,21 +172,12 @@ public abstract class AbstractClusteredInvalidationSessionTest extends AbstractT
             {
                 HttpSession session = request.getSession(false);
                 session.invalidate();
-
-                try
-                {
-                    session.invalidate();
-                    fail("Session should be invalid");
-                }
-                catch (IllegalStateException e)
-                {
-                    //expected
-                }
+                assertThrows(IllegalStateException.class, () ->  session.invalidate());
             }
             else if ("test".equals(action))
             {
                 HttpSession session = request.getSession(false);
-                assertEquals(null, session);
+                assertNull(session);
             }
         }
     }
