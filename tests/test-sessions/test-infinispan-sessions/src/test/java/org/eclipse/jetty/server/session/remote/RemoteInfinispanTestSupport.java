@@ -68,7 +68,7 @@ public class RemoteInfinispanTestSupport
             long start = System.currentTimeMillis();
             String infinispanVersion = System.getProperty("infinispan.docker.image.version", "9.4.8.Final");
             infinispan =
-                new GenericContainer(DockerImageName.parse(System.getProperty( "infinispan.docker.image.name", "jboss/infinispan-server") +
+                new GenericContainer(DockerImageName.parse(System.getProperty("infinispan.docker.image.name", "jboss/infinispan-server") +
                                          ":" + infinispanVersion))
                     .withEnv("APP_USER","theuser")
                     .withEnv("APP_PASS","foobar")

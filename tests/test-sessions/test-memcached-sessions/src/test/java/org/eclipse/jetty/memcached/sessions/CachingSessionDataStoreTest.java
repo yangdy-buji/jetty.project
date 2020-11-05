@@ -80,7 +80,7 @@ public class CachingSessionDataStoreTest
                 ContentResponse response = client.GET("http://localhost:" + port + contextPath + servletMapping + "?action=create");
                 assertEquals(HttpServletResponse.SC_OK, response.getStatus());
                 String sessionCookie = response.getHeaders().get("Set-Cookie");
-                assertNotNull( sessionCookie );
+                assertNotNull(sessionCookie);
                 String id = TestServer.extractSessionId(sessionCookie);
 
                 //check that the memcache contains the session, and the session data store contains the session

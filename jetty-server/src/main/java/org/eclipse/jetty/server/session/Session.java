@@ -357,7 +357,7 @@ public class Session implements SessionHandler.SessionIf
      */
     public void unbindValue(java.lang.String name, Object value)
     {
-        if (value != null && value instanceof HttpSessionBindingListener)
+        if (value instanceof HttpSessionBindingListener)
             ((HttpSessionBindingListener)value).valueUnbound(new HttpSessionBindingEvent(this, name));
     }
 
@@ -370,7 +370,7 @@ public class Session implements SessionHandler.SessionIf
      */
     public void bindValue(java.lang.String name, Object value)
     {
-        if (value != null && value instanceof HttpSessionBindingListener)
+        if (value instanceof HttpSessionBindingListener)
             ((HttpSessionBindingListener)value).valueBound(new HttpSessionBindingEvent(this, name));
     }
 
@@ -390,9 +390,9 @@ public class Session implements SessionHandler.SessionIf
         try 
         {
             HttpSessionEvent event = new HttpSessionEvent(this);
-            for (Iterator<String> iter = _sessionData.getKeys().iterator(); iter.hasNext();)
+            for (String s : _sessionData.getKeys())
             {
-                Object value = _sessionData.getAttribute(iter.next());
+                Object value = _sessionData.getAttribute(s);
                 if (value instanceof HttpSessionActivationListener)
                 {
                     HttpSessionActivationListener listener = (HttpSessionActivationListener)value;
@@ -412,9 +412,9 @@ public class Session implements SessionHandler.SessionIf
     public void willPassivate()
     {
         HttpSessionEvent event = new HttpSessionEvent(this);
-        for (Iterator<String> iter = _sessionData.getKeys().iterator(); iter.hasNext();)
+        for (String s : _sessionData.getKeys())
         {
-            Object value = _sessionData.getAttribute(iter.next());
+            Object value = _sessionData.getAttribute(s);
             if (value instanceof HttpSessionActivationListener)
             {
                 HttpSessionActivationListener listener = (HttpSessionActivationListener)value;

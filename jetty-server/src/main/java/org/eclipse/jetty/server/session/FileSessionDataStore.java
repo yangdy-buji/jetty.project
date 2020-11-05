@@ -153,7 +153,7 @@ public class FileSessionDataStore extends AbstractSessionDataStore
     public Set<String> doGetExpired(final Set<String> candidates)
     {
         final long now = System.currentTimeMillis();
-        HashSet<String> expired = new HashSet<String>();
+        HashSet<String> expired = new HashSet<>();
 
         //iterate over the files and work out which have expired
         for (String filename : _sessionFileMap.values())
@@ -311,7 +311,7 @@ public class FileSessionDataStore extends AbstractSessionDataStore
     @Override
     public void doStore(String id, SessionData data, long lastSaveTime) throws Exception
     {
-        File file = null;
+        File file;
         if (_storeDir != null)
         {
             delete(id);

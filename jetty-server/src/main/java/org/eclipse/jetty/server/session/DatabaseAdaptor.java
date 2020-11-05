@@ -195,7 +195,7 @@ public class DatabaseAdaptor
         if (_dbName == null)
             throw new IllegalStateException("DbAdaptor missing metadata");
 
-        return (_dbName != null && _dbName.startsWith("oracle"));
+        return _dbName.startsWith("oracle");
     }
 
     /**

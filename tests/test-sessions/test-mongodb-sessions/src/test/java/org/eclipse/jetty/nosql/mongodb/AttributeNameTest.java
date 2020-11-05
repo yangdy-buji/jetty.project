@@ -108,7 +108,7 @@ public class AttributeNameTest
 
                 String sessionCookie = response.getHeaders().get(HttpHeader.SET_COOKIE);
 
-                assertNotNull( sessionCookie );
+                assertNotNull(sessionCookie);
                 //Mangle the cookie, replacing Path with $Path, etc.
                 sessionCookie = sessionCookie.replaceFirst("(\\W)(P|p)ath=", "$1\\$Path=");
 

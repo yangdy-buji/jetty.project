@@ -301,17 +301,10 @@ public class SessionHandler extends ScopedHandler
             //We annoint the calling thread with
             //the webapp's classloader because the calling thread may
             //come from the scavenger, rather than a request thread
-            Runnable r = new Runnable()
+            Runnable r = () ->
             {
-                @Override
-                public void run()
-                {
-                    HttpSessionEvent event = new HttpSessionEvent(session);
-                    for (int i = _sessionListeners.size() - 1; i >= 0; i--)
-                    {
-                        _sessionListeners.get(i).sessionDestroyed(event);
-                    }
-                }
+                HttpSessionEvent event = new HttpSessionEvent(session);
+                _sessionListeners.forEach(httpSessionListener -> httpSessionListener.sessionDestroyed(event));
             };
             _sessionContext.run(r);
         }
@@ -330,10 +323,7 @@ public class SessionHandler extends ScopedHandler
         if (_sessionListeners != null)
         {
             HttpSessionEvent event = new HttpSessionEvent(session);
-            for (int i = _sessionListeners.size() - 1; i >= 0; i--)
-            {
-                _sessionListeners.get(i).sessionCreated(event);
-            }
+            _sessionListeners.stream().forEach(httpSessionListener -> httpSessionListener.sessionCreated(event));
         }
     }
 
@@ -343,10 +333,7 @@ public class SessionHandler extends ScopedHandler
         if (!_sessionIdListeners.isEmpty())
         {
             HttpSessionEvent event = new HttpSessionEvent(session);
-            for (HttpSessionIdListener l : _sessionIdListeners)
-            {
-                l.sessionIdChanged(event, oldId);
-            }
+            _sessionIdListeners.forEach(httpSessionIdListener -> httpSessionIdListener.sessionIdChanged(event, oldId));
         }
     }
 
@@ -1019,10 +1006,7 @@ public class SessionHandler extends ScopedHandler
                     if (_sessionListeners != null)
                     {
                         HttpSessionEvent event = new HttpSessionEvent(session);
-                        for (int i = _sessionListeners.size() - 1; i >= 0; i--)
-                        {
-                            _sessionListeners.get(i).sessionDestroyed(event);
-                        }
+                        _sessionListeners.forEach(httpSessionListener -> httpSessionListener.sessionDestroyed(event));
                     }
                 }
             }

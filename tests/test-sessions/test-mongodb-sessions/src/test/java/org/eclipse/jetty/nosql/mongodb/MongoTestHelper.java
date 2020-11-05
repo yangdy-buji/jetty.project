@@ -54,7 +54,7 @@ public class MongoTestHelper
     public static final String COLLECTION_NAME = "testsessions";
 
     static GenericContainer mongo =
-        new GenericContainer(DockerImageName.parse( "mongo:" + System.getProperty( "mongo.docker.version", "2.2.7")))
+        new GenericContainer(DockerImageName.parse("mongo:" + System.getProperty("mongo.docker.version", "2.2.7")))
             .withLogConsumer(new Slf4jLogConsumer(MONGO_LOG))
             .waitingFor(new LogMessageWaitStrategy()
                             .withRegEx(".*waiting for connections.*"));

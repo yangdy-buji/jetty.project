@@ -83,8 +83,8 @@ public abstract class AbstractSessionDataStore extends ContainerLifeCycle implem
         if (!isStarted())
             throw new IllegalStateException("Not started");
 
-        final AtomicReference<SessionData> reference = new AtomicReference<SessionData>();
-        final AtomicReference<Exception> exception = new AtomicReference<Exception>();
+        final AtomicReference<SessionData> reference = new AtomicReference<>();
+        final AtomicReference<Exception> exception = new AtomicReference<>();
 
         Runnable r = () ->
         {
@@ -114,40 +114,36 @@ public abstract class AbstractSessionDataStore extends ContainerLifeCycle implem
         if (data == null)
             return;
 
-        final AtomicReference<Exception> exception = new AtomicReference<Exception>();
+        final AtomicReference<Exception> exception = new AtomicReference<>();
 
-        Runnable r = new Runnable()
+        Runnable r = () ->
         {
-            @Override
-            public void run()
+            long lastSave = data.getLastSaved();
+            long savePeriodMs = (_savePeriodSec <= 0 ? 0 : TimeUnit.SECONDS.toMillis(_savePeriodSec));
+
+            if (LOG.isDebugEnabled())
             {
-                long lastSave = data.getLastSaved();
-                long savePeriodMs = (_savePeriodSec <= 0 ? 0 : TimeUnit.SECONDS.toMillis(_savePeriodSec));
+                LOG.debug("Store: id={}, mdirty={}, dirty={}, lsave={}, period={}, elapsed={}", id, data.isMetaDataDirty(),
+                    data.isDirty(), data.getLastSaved(), savePeriodMs, (System.currentTimeMillis() - lastSave));
+            }
 
-                if (LOG.isDebugEnabled())
+            //save session if attribute changed, never been saved or metadata changed (eg expiry time) and save interval exceeded
+            if (data.isDirty() || (lastSave <= 0) ||
+                (data.isMetaDataDirty() && ((System.currentTimeMillis() - lastSave) >= savePeriodMs)))
+            {
+                //set the last saved time to now
+                data.setLastSaved(System.currentTimeMillis());
+                try
                 {
-                    LOG.debug("Store: id={}, mdirty={}, dirty={}, lsave={}, period={}, elapsed={}", id, data.isMetaDataDirty(),
-                        data.isDirty(), data.getLastSaved(), savePeriodMs, (System.currentTimeMillis() - lastSave));
+                    //call the specific store method, passing in previous save time
+                    doStore(id, data, lastSave);
+                    data.clean(); //unset all dirty flags
                 }
-
-                //save session if attribute changed, never been saved or metadata changed (eg expiry time) and save interval exceeded
-                if (data.isDirty() || (lastSave <= 0) ||
-                    (data.isMetaDataDirty() && ((System.currentTimeMillis() - lastSave) >= savePeriodMs)))
+                catch (Exception e)
                 {
-                    //set the last saved time to now
-                    data.setLastSaved(System.currentTimeMillis());
-                    try
-                    {
-                        //call the specific store method, passing in previous save time
-                        doStore(id, data, lastSave);
-                        data.clean(); //unset all dirty flags
-                    }
-                    catch (Exception e)
-                    {
-                        //reset last save time if save failed
-                        data.setLastSaved(lastSave);
-                        exception.set(e);
-                    }
+                    //reset last save time if save failed
+                    data.setLastSaved(lastSave);
+                    exception.set(e);
                 }
             }
         };
