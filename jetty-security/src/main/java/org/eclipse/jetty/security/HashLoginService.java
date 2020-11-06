@@ -19,10 +19,7 @@
 package org.eclipse.jetty.security;
 
 import java.util.List;
-import java.util.Set;
-import java.util.stream.Collectors;
 
-import org.eclipse.jetty.server.UserIdentity;
 import org.eclipse.jetty.util.log.Log;
 import org.eclipse.jetty.util.log.Logger;
 import org.eclipse.jetty.util.resource.Resource;
@@ -128,33 +125,15 @@ public class HashLoginService extends AbstractLoginService
     }
 
     @Override
-    protected String[] loadRoleInfo(UserPrincipal user)
+    protected List<RolePrincipal> loadRoleInfo(UserPrincipal user)
     {
-        UserIdentity id = _userStore.getUserIdentity(user.getName());
-        if (id == null)
-            return null;
-
-        Set<RolePrincipal> roles = id.getSubject().getPrincipals(RolePrincipal.class);
-        if (roles == null)
-            return null;
-
-        List<String> list = roles.stream()
-            .map(rolePrincipal -> rolePrincipal.getName())
-            .collect(Collectors.toList());
-
-        return list.toArray(new String[roles.size()]);
+        return _userStore.getRolePrincipals(user.getName());
     }
 
     @Override
     protected UserPrincipal loadUserInfo(String userName)
     {
-        UserIdentity id = _userStore.getUserIdentity(userName);
-        if (id != null)
-        {
-            return (UserPrincipal)id.getUserPrincipal();
-        }
-
-        return null;
+        return _userStore.getUserPrincipal(userName);
     }
 
     /**
@@ -164,12 +143,10 @@ public class HashLoginService extends AbstractLoginService
     protected void doStart() throws Exception
     {
         super.doStart();
-
-        // can be null so we switch to previous behaviour using PropertyUserStore
         if (_userStore == null)
         {
             if (LOG.isDebugEnabled())
-                LOG.debug("doStart: Starting new PropertyUserStore. PropertiesFile: " + _config + " hotReload: " + hotReload);
+                LOG.debug("doStart: Starting new PropertyUserStore. PropertiesFile: {} hotReload: {}",  _config, hotReload);
             PropertyUserStore propertyUserStore = new PropertyUserStore();
             propertyUserStore.setHotReload(hotReload);
             propertyUserStore.setConfigPath(_config);

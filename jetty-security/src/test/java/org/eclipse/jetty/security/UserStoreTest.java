@@ -49,8 +49,8 @@ public class UserStoreTest
         UserIdentity userIdentity = this.userStore.getUserIdentity("foo");
         assertNotNull(userIdentity);
         assertEquals("foo", userIdentity.getUserPrincipal().getName());
-        Set<AbstractLoginService.RolePrincipal>
-            roles = userIdentity.getSubject().getPrincipals(AbstractLoginService.RolePrincipal.class);
+        Set<RolePrincipal>
+            roles = userIdentity.getSubject().getPrincipals(RolePrincipal.class);
         List<String> list = roles.stream()
             .map(rolePrincipal -> rolePrincipal.getName())
             .collect(Collectors.toList());

@@ -27,8 +27,8 @@ import javax.security.auth.callback.CallbackHandler;
 
 import org.eclipse.jetty.jaas.JAASLoginService;
 import org.eclipse.jetty.jaas.PropertyUserStoreManager;
-import org.eclipse.jetty.security.AbstractLoginService;
 import org.eclipse.jetty.security.PropertyUserStore;
+import org.eclipse.jetty.security.RolePrincipal;
 import org.eclipse.jetty.server.UserIdentity;
 import org.eclipse.jetty.util.log.Log;
 import org.eclipse.jetty.util.log.Logger;
@@ -132,10 +132,10 @@ public class PropertyFileLoginModule extends AbstractLoginModule
 
         //TODO in future versions change the impl of PropertyUserStore so its not
         //storing Subjects etc, just UserInfo
-        Set<AbstractLoginService.RolePrincipal> principals = userIdentity.getSubject().getPrincipals(AbstractLoginService.RolePrincipal.class);
+        Set<RolePrincipal> principals = userIdentity.getSubject().getPrincipals(RolePrincipal.class);
 
         List<String> roles = principals.stream()
-            .map(AbstractLoginService.RolePrincipal::getName)
+            .map(RolePrincipal::getName)
             .collect(Collectors.toList());
 
         Credential credential = (Credential)userIdentity.getSubject().getPrivateCredentials().iterator().next();
