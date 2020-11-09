@@ -20,7 +20,6 @@ package org.eclipse.jetty.security;
 
 import java.io.Serializable;
 import java.security.Principal;
-
 import javax.security.auth.Subject;
 
 /**

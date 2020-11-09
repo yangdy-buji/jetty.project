@@ -19,7 +19,6 @@
 package org.eclipse.jetty.security;
 
 import java.util.List;
-
 import javax.security.auth.Subject;
 import javax.servlet.ServletRequest;
 

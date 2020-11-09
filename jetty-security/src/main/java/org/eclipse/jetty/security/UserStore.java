@@ -43,7 +43,7 @@ public class UserStore extends AbstractLifeCycle
         protected UserPrincipal _userPrincipal;
         protected List<RolePrincipal> _rolePrincipals;
         
-        protected UserEntry(String username, Credential credential, String [] roles)
+        protected UserEntry(String username, Credential credential, String[] roles)
         {
             _userPrincipal = new UserPrincipal(username, credential);
 
