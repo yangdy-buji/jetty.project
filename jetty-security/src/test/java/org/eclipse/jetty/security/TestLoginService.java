@@ -43,24 +43,10 @@ public class TestLoginService extends AbstractLoginService
         userStore.addUser(username, credential, roles);
     }
 
-    /**
-     * @see org.eclipse.jetty.security.AbstractLoginService#loadRoleInfo(org.eclipse.jetty.security.AbstractLoginService.UserPrincipal)
-     */
     @Override
-    protected String[] loadRoleInfo(UserPrincipal user)
+    protected List<RolePrincipal> loadRoleInfo(UserPrincipal user)
     {
-        UserIdentity userIdentity = userStore.getUserIdentity(user.getName());
-        Set<RolePrincipal> roles = userIdentity.getSubject().getPrincipals(RolePrincipal.class);
-        if (roles == null)
-            return null;
-
-        List<String> list = new ArrayList<>();
-        for (RolePrincipal r : roles)
-        {
-            list.add(r.getName());
-        }
-
-        return list.toArray(new String[roles.size()]);
+        return userStore.getRolePrincipals(user.getName());
     }
 
     /**
@@ -69,7 +55,6 @@ public class TestLoginService extends AbstractLoginService
     @Override
     protected UserPrincipal loadUserInfo(String username)
     {
-        UserIdentity userIdentity = userStore.getUserIdentity(username);
-        return userIdentity == null ? null : (UserPrincipal)userIdentity.getUserPrincipal();
+        return userStore.getUserPrincipal(username);
     }
 }

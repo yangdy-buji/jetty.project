@@ -28,6 +28,7 @@ import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Properties;
+import java.util.stream.Collectors;
 import javax.servlet.ServletRequest;
 
 import org.eclipse.jetty.util.Loader;
@@ -61,9 +62,9 @@ public class JDBCLoginService extends AbstractLoginService
     protected String _userTableKey;
     protected String _userTablePasswordField;
     protected String _roleTableRoleField;
-    protected Connection _con;
     protected String _userSql;
     protected String _roleSql;
+    protected Connection _con;
 
     /**
      * JDBCKnownUser
@@ -175,21 +176,10 @@ public class JDBCLoginService extends AbstractLoginService
     /**
      * (re)Connect to database with parameters setup by loadConfig()
      */
-    public void connectDatabase()
+    public Connection connectDatabase()
+        throws SQLException
     {
-        try
-        {
-            Class.forName(_jdbcDriver);
-            _con = DriverManager.getConnection(_url, _userName, _password);
-        }
-        catch (SQLException e)
-        {
-            LOG.warn("UserRealm " + getName() + " could not connect to database; will try later", e);
-        }
-        catch (ClassNotFoundException e)
-        {
-            LOG.warn("UserRealm " + getName() + " could not connect to database; will try later", e);
-        }
+        return DriverManager.getConnection(_url, _userName, _password);
     }
 
     @Override
@@ -199,9 +189,6 @@ public class JDBCLoginService extends AbstractLoginService
         {
             if (null == _con)
                 connectDatabase();
-
-            if (null == _con)
-                throw new SQLException("Can't connect to database");
 
             try (PreparedStatement stat1 = _con.prepareStatement(_userSql))
             {
@@ -220,7 +207,7 @@ public class JDBCLoginService extends AbstractLoginService
         }
         catch (SQLException e)
         {
-            LOG.warn("UserRealm " + getName() + " could not load user information from database", e);
+            LOG.warn("LoginService {} could not load user {}", getName(), username, e);
             closeConnection();
         }
 
@@ -228,17 +215,17 @@ public class JDBCLoginService extends AbstractLoginService
     }
 
     @Override
-    public String[] loadRoleInfo(UserPrincipal user)
+    public List<RolePrincipal> loadRoleInfo(UserPrincipal user)
     {
+        if (user == null)
+            return null;
+
         JDBCUserPrincipal jdbcUser = (JDBCUserPrincipal)user;
 
         try
         {
             if (null == _con)
                 connectDatabase();
-
-            if (null == _con)
-                throw new SQLException("Can't connect to database");
 
             List<String> roles = new ArrayList<String>();
 
@@ -248,16 +235,15 @@ public class JDBCLoginService extends AbstractLoginService
                 try (ResultSet rs2 = stat2.executeQuery())
                 {
                     while (rs2.next())
-                    {
                         roles.add(rs2.getString(_roleTableRoleField));
-                    }
-                    return roles.toArray(new String[roles.size()]);
+                                        
+                    return roles.stream().map(RolePrincipal::new).collect(Collectors.toList());
                 }
             }
         }
         catch (SQLException e)
         {
-            LOG.warn("UserRealm " + getName() + " could not load user information from database", e);
+            LOG.warn("LoginService {} could not load roles for user {}", getName(), user.getName(), e);
             closeConnection();
         }
 
@@ -282,7 +268,7 @@ public class JDBCLoginService extends AbstractLoginService
         if (_con != null)
         {
             if (LOG.isDebugEnabled())
-                LOG.debug("Closing db connection for JDBCUserRealm");
+                LOG.debug("Closing db connection for JDBCLoginService");
             try
             {
                 _con.close();

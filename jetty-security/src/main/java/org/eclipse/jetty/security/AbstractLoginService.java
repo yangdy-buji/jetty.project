@@ -18,6 +18,7 @@
 
 package org.eclipse.jetty.security;
 
+import java.util.ArrayList;
 import java.util.List;
 import javax.security.auth.Subject;
 import javax.servlet.ServletRequest;
@@ -103,15 +104,20 @@ public abstract class AbstractLoginService extends ContainerLifeCycle implements
             //safe to load the roles
             List<RolePrincipal> roles = loadRoleInfo(userPrincipal);
 
+            List<String> roleNames = new ArrayList<>();
             Subject subject = new Subject();
-            userPrincipal.configureForSubject(subject);
+            userPrincipal.configureSubject(subject);
             if (roles != null)
             {
-                roles.stream().forEach(p -> p.configureForSubject(subject));
+                roles.stream().forEach(p -> 
+                {
+                    p.configureForSubject(subject);
+                    roleNames.add(p.getName());
+                });
             }
   
             subject.setReadOnly();
-            return _identityService.newUserIdentity(subject, userPrincipal, roles);
+            return _identityService.newUserIdentity(subject, userPrincipal, roleNames.toArray(new String[0]));
         }
 
         return null;

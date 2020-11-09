@@ -54,12 +54,25 @@ public class UserPrincipal implements Principal, Serializable
         return (u != null && authenticate(u._credential));
     }
 
-    public void configureForSubject(Subject subject)
+    public void configureSubject(Subject subject)
     {
+        if (subject == null)
+            return;
+
         subject.getPrincipals().add(this);
-        subject.getPrivateCredentials().add(_credential); 
+        if (_credential != null)
+            subject.getPrivateCredentials().add(_credential); 
     }
-    
+
+    public void deconfigureSubject(Subject subject)
+    {
+        if (subject == null)
+            return;
+        subject.getPrincipals().remove(this);
+        if (_credential != null)
+            subject.getPrivateCredentials().remove(_credential);
+    }
+
     @Override
     public String getName()
     {

@@ -18,58 +18,24 @@
 
 package org.eclipse.jetty.security;
 
-import java.util.Arrays;
-import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.stream.Collectors;
-import javax.security.auth.Subject;
 
-import org.eclipse.jetty.server.UserIdentity;
 import org.eclipse.jetty.util.component.AbstractLifeCycle;
 import org.eclipse.jetty.util.security.Credential;
 
 /**
- * Base class to store User
+ * Store of user authentication and authorization information.
+ * 
  */
 public class UserStore extends AbstractLifeCycle
 {
-    private IdentityService _identityService = new DefaultIdentityService();
-    private final Map<String, UserEntry> _users = new ConcurrentHashMap<>();
+    protected final Map<String, User> _users = new ConcurrentHashMap<>();
     
-    protected class UserEntry
-    {
-        protected UserPrincipal _userPrincipal;
-        protected List<RolePrincipal> _rolePrincipals;
-        
-        protected UserEntry(String username, Credential credential, String[] roles)
-        {
-            _userPrincipal = new UserPrincipal(username, credential);
-
-            _rolePrincipals = Collections.emptyList();
-            
-            if (roles != null)
-            {
-                _rolePrincipals = Arrays.stream(roles).map(RolePrincipal::new).collect(Collectors.toList());
-            }
-
-        }
-        
-        protected UserPrincipal getUserPrincipal()
-        {
-            return _userPrincipal;
-        }
-        
-        protected List<RolePrincipal> getRolePrincipals()
-        {
-            return _rolePrincipals;
-        }
-    }
-
     public void addUser(String username, Credential credential, String[] roles)
     {
-        _users.put(username, new UserEntry(username, credential, roles));
+        _users.put(username, new User(username, credential, roles));
     }
 
     public void removeUser(String username)
@@ -79,13 +45,19 @@ public class UserStore extends AbstractLifeCycle
     
     public UserPrincipal getUserPrincipal(String username)
     {
-        UserEntry user = _users.get(username);
+        User user = _users.get(username);
         return (user == null ? null : user.getUserPrincipal());
     }
     
     public List<RolePrincipal> getRolePrincipals(String username)
     {
-        UserEntry user = _users.get(username);
+        User user = _users.get(username);
         return (user == null ? null : user.getRolePrincipals());
+    }
+
+    @Override
+    public String toString()
+    {
+        return String.format("%s@%x[users.count=%d]", getClass().getSimpleName(), hashCode(), _users.size());
     }
 }
