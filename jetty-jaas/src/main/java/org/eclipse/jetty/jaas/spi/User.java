@@ -35,7 +35,7 @@ import org.eclipse.jetty.util.security.Credential;
 public class User
 {
 
-    private UserPrincipal _userPrincipal;
+    protected UserPrincipal _userPrincipal;
     protected List<String> _roleNames = new ArrayList<>();
     protected boolean _rolesLoaded = false;
 
