@@ -25,12 +25,8 @@ import org.eclipse.jetty.util.log.Logger;
 import org.eclipse.jetty.util.resource.Resource;
 
 /**
- * Properties User Realm.
- * <p>
- * An implementation of UserRealm that stores users and roles in-memory in HashMaps.
- * <p>
- * Typically these maps are populated by calling the load() method or passing a properties resource to the constructor. The format of the properties file is:
- *
+ * An implementation of a LoginService that stores users and roles in-memory in HashMaps.
+ * The source of the users and roles information is a properties file formatted like so:
  * <pre>
  *  username: password [,rolename ...]
  * </pre>
@@ -76,7 +72,7 @@ public class HashLoginService extends AbstractLoginService
     }
 
     /**
-     * Load realm users from properties file.
+     * Load users from properties file.
      * <p>
      * The property file maps usernames to password specs followed by an optional comma separated list of role names.
      * </p>
@@ -136,9 +132,6 @@ public class HashLoginService extends AbstractLoginService
         return _userStore.getUserPrincipal(userName);
     }
 
-    /**
-     * @see org.eclipse.jetty.util.component.AbstractLifeCycle#doStart()
-     */
     @Override
     protected void doStart() throws Exception
     {
@@ -166,7 +159,6 @@ public class HashLoginService extends AbstractLoginService
     }
 
     /**
-     * To facilitate testing.
      *
      * @return true if a UserStore has been created from a config, false if a UserStore was provided.
      */

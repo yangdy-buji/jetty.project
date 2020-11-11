@@ -23,7 +23,8 @@ import javax.security.auth.login.LoginException;
 
 import org.eclipse.jetty.jaas.callback.ServletRequestCallback;
 import org.eclipse.jetty.jaas.spi.AbstractLoginModule;
-import org.eclipse.jetty.jaas.spi.JAASUser;
+import org.eclipse.jetty.jaas.spi.User;
+import org.eclipse.jetty.security.UserPrincipal;
 import org.eclipse.jetty.util.ArrayUtil;
 import org.eclipse.jetty.util.security.Password;
 
@@ -35,8 +36,8 @@ public class TestLoginModule extends AbstractLoginModule
 
     @Override
     public JAASUser getUser(String username) throws Exception
-    {
-        return new JAASUser(username, new Password("aaa"));
+    {        
+        return new JAASUser(new User(new UserPrincipal(username, new Password("aaa"))));
     }
 
     @Override

@@ -19,9 +19,13 @@
 package org.eclipse.jetty.security.jaspi;
 
 import java.io.IOException;
+import java.util.Arrays;
 import java.util.Base64;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
+
 import javax.servlet.ServletException;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
@@ -29,6 +33,8 @@ import javax.servlet.http.HttpServletResponse;
 import org.eclipse.jetty.security.AbstractLoginService;
 import org.eclipse.jetty.security.ConstraintMapping;
 import org.eclipse.jetty.security.ConstraintSecurityHandler;
+import org.eclipse.jetty.security.RolePrincipal;
+import org.eclipse.jetty.security.UserPrincipal;
 import org.eclipse.jetty.server.LocalConnector;
 import org.eclipse.jetty.server.Request;
 import org.eclipse.jetty.server.Server;
@@ -55,7 +61,7 @@ public class JaspiTest
     public class TestLoginService extends AbstractLoginService
     {
         protected Map<String, UserPrincipal> _users = new HashMap<>();
-        protected Map<String, String[]> _roles = new HashMap();
+        protected Map<String, List<RolePrincipal>> _roles = new HashMap<>();
 
         public TestLoginService(String name)
         {
@@ -66,21 +72,19 @@ public class JaspiTest
         {
             UserPrincipal userPrincipal = new UserPrincipal(username, credential);
             _users.put(username, userPrincipal);
-            _roles.put(username, roles);
+            if (roles != null)
+            {
+                List<RolePrincipal> rps = Arrays.stream(roles).map(RolePrincipal::new).collect(Collectors.toList());
+                _roles.put(username, rps);
+            }
         }
 
-        /**
-         * @see org.eclipse.jetty.security.AbstractLoginService#loadRoleInfo(org.eclipse.jetty.security.AbstractLoginService.UserPrincipal)
-         */
         @Override
-        protected String[] loadRoleInfo(UserPrincipal user)
+        protected List<RolePrincipal> loadRoleInfo(UserPrincipal user)
         {
             return _roles.get(user.getName());
         }
 
-        /**
-         * @see org.eclipse.jetty.security.AbstractLoginService#loadUserInfo(java.lang.String)
-         */
         @Override
         protected UserPrincipal loadUserInfo(String username)
         {

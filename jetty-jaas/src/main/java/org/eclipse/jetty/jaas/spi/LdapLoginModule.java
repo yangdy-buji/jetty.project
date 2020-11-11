@@ -202,12 +202,12 @@ public class LdapLoginModule extends AbstractLoginModule
             return getUserRoles(_rootContext, getUserName(), attributes);
         }
     }
-    
+
     public class LDAPBindingUser extends User
     {   
-       DirContext _context;
-       String _userDn;
-        
+        DirContext _context;
+        String _userDn;
+
         public LDAPBindingUser(UserPrincipal user, DirContext context, String userDn)
         {
             super(user);
@@ -547,8 +547,6 @@ public class LdapLoginModule extends AbstractLoginModule
             LDAPBindingUser userInfo = new LDAPBindingUser(new UserPrincipal(username, null), dirContext, userDn);
             setCurrentUser(new JAASUser(userInfo));
             setAuthenticated(true);
-            userInfo.fetchRoles();
-            //TO DO TO DO TO DO
             return true;
         }
         catch (javax.naming.AuthenticationException e)
