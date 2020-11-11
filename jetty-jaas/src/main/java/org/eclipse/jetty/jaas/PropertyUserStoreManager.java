@@ -41,7 +41,7 @@ import org.eclipse.jetty.util.log.Logger;
  */
 public class PropertyUserStoreManager extends AbstractLifeCycle
 {
-    private static final Logger LOG = Log.getLogger(PropertyFileLoginModule.class);
+    private static final Logger LOG = Log.getLogger(PropertyUserStoreManager.class);
 
     /**
      * Map of user authentication and authorization information loaded in from a property file.

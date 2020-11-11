@@ -188,7 +188,7 @@ public class JDBCLoginService extends AbstractLoginService
         try
         {
             if (null == _con)
-                connectDatabase();
+                _con = connectDatabase();
 
             try (PreparedStatement stat1 = _con.prepareStatement(_userSql))
             {
@@ -225,7 +225,7 @@ public class JDBCLoginService extends AbstractLoginService
         try
         {
             if (null == _con)
-                connectDatabase();
+                _con = connectDatabase();
 
             List<String> roles = new ArrayList<String>();
 
